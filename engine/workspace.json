@@ -1,0 +1,19 @@
+{
+  "workspace": "Brightpath Logistics (demo fixture)",
+  "plan": "growth",
+  "shared_inboxes": [
+    {"name": "Support", "address": "support@brightpath.example"},
+    {"name": "Billing", "address": "billing@brightpath.example"},
+    {"name": "Events", "address": "events@brightpath.example"}
+  ],
+  "agents": [
+    {"name": "John Doe", "email": "john.doe@brightpath.example"},
+    {"name": "John Baker", "email": "john.baker@brightpath.example"},
+    {"name": "Sarah Lee", "email": "sarah.lee@brightpath.example"},
+    {"name": "Teresa Alvarez", "email": "teresa@brightpath.example"},
+    {"name": "Dana Whitfield", "email": "dana@brightpath.example"},
+    {"name": "Jade Nguyen", "email": "jade@brightpath.example"}
+  ],
+  "tags": ["VIP", "Billing", "Refund Request", "Urgent",
+           "Invoice/Statement Request", "Spam", "Newsletter"]
+}
