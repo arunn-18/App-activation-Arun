@@ -1,0 +1,11 @@
+{
+  "connected_apps": {
+    "salesforce": {
+      "connected": true,
+      "prerequisites": {
+        "salesforce_connected": true,
+        "account_team_enabled": true
+      }
+    }
+  }
+}
