@@ -6,12 +6,17 @@ Run:  ../../automation-copilot/.venv/bin/python serve2.py   ->  http://127.0.0.1
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import connected_apps
 import copilot
 import extract
 import workspace as wsmod
 
 CLIENT = extract.make_client()
 WS = wsmod.load()  # demo fixture; comment out to run workspace-less like the eval
+# connected-apps fixture: same one serve_apps.py (the Apps-panel entry) uses,
+# so a connector rule built from EITHER panel gets the same prerequisite
+# check and the same test-run — one engine behind both entry points.
+APPS_WS = connected_apps.load()
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -71,7 +76,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             req = json.loads(self.rfile.read(length) or b"{}")
             msgs = [m for m in req.get("messages", []) if m.get("role") in ("user", "assistant")]
-            reply = copilot.respond(CLIENT, msgs, ws=WS)
+            reply = copilot.respond(CLIENT, msgs, ws=WS, apps_ws=APPS_WS)
             # the ```json null``` block is machine plumbing for the eval CLI — not for humans
             reply = reply.replace("```json\nnull\n```", "").rstrip()
             self._send(200, json.dumps({"reply": reply}))

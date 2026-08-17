@@ -22,7 +22,8 @@ _OVERVIEW = (
     "conversation's current tags/assignee/status, day received, or an "
     "AI-extracted variable), then runs actions — tag or "
     "untag, assign (one person or round-robin), set status, add a note, send "
-    "a reply or notification, add to or remove from a shared inbox. Ask about "
+    "a reply or notification, add to or remove from a shared inbox, or (one "
+    "recipe so far) run a connector automation. Ask about "
     "any of these and I'll go deeper."
 )
 
@@ -74,7 +75,9 @@ _TOPICS = [
      "the set."),
     (("integrat", "connector", "salesforce", "hubspot", "clickup", "custom field",
       "custom object", "approval", "sla", "webhook", "api"),
-     "Not in these rules: " + "; ".join(schema.UNSUPPORTED.values())
+     "One connector recipe is supported so far: " + next(iter(schema.RECIPES.values()))["name"]
+     + " — " + next(iter(schema.RECIPES.values()))["description"] + " Everything else here "
+     "isn't yet: " + "; ".join(schema.UNSUPPORTED.values())
      + ". I'll always say so rather than fake one of these."),
 ]
 

@@ -10,8 +10,13 @@ Takes a (possibly partial) extracted spec + the conversation text and decides:
 
 Question planning: bundle at most MAX_QUESTIONS per turn, ordered trigger ->
 scope/conditions -> action params. The loop keeps asking until nothing is missing.
+
+apps_ws (optional): the connected_apps.py fixture, re-checked against a
+connector action's chosen recipe's prerequisites (e.g. is Salesforce actually
+connected?). None skips the check — see the connector prerequisites block.
 """
 import re
+import connected_apps
 import schema
 import workspace as wsmod
 
@@ -150,7 +155,7 @@ def _resolve_entity(ws, kind, v, slot, missing, resolutions, entity_notes):
         })
 
 
-def validate(spec, conversation_text, ws=None, user_messages=None):
+def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None):
     convo_norm = _norm(conversation_text)
     errors, missing, hallucinated = [], [], []
     resolutions, entity_notes, assumptions = [], [], []
@@ -474,7 +479,14 @@ def validate(spec, conversation_text, ws=None, user_messages=None):
                 entry = {"slot": f"actions[{ai}].{pname}", "question": p["question"]}
                 if p.get("enum"):
                     entry["kind"] = "choice"
-                    entry["options"] = [{"label": v, "value": v} for v in p["enum"]]
+                    labels = p.get("enum_labels") or {}
+                    # value is what a picked option composes into chat, so it
+                    # must read as real user text — the human label when one
+                    # exists (a raw enum id like a recipe id never should),
+                    # else the enum value itself (already human words, e.g.
+                    # STATUS_VALUES).
+                    entry["options"] = [{"label": labels.get(v, v), "value": labels.get(v, v)}
+                                        for v in p["enum"]]
                 else:
                     # entity slots: offer what the workspace actually has (the
                     # Amplitude agent-setup pattern), with a free-text lane
@@ -534,6 +546,36 @@ def validate(spec, conversation_text, ws=None, user_messages=None):
                         continue
                     _resolve_entity(ws, kind, v, f"actions[{ai}].{pname}",
                                     missing, resolutions, entity_notes)
+
+    # ---- connector: recipe prerequisites -------------------------------------
+    # Recipe EXISTENCE and the "recipe id is required, non-inferred vocabulary"
+    # check both fall out of the generic required/enum machinery above for
+    # free (recipe is just another ACTIONS param with an enum) — this block
+    # only adds what's specific to connectors: re-verifying the CHOSEN
+    # recipe's prerequisites against the connected-apps fixture, the same
+    # re-verification stance workspace entities get elsewhere in this
+    # function (the model's own say-so that something is buildable is never
+    # trusted alone).
+    #
+    # GENERIC (keep for recipe #2+): this loop is entirely data-driven off
+    # recipe["prerequisites"] — it needs no per-recipe code.
+    # SHAPED BY ONE EXAMPLE: only runs when apps_ws is supplied. None means
+    # "no connected-app context" (eval/CLI runs, or the Automations-panel demo
+    # before it loads the fixture) — the check is SKIPPED rather than failing
+    # every connector rule callers that don't pass one haven't opted into.
+    if apps_ws is not None:
+        for ai, action in enumerate(spec.get("actions") or []):
+            if action.get("type") != "connector":
+                continue
+            recipe = schema.RECIPES.get(action.get("recipe"))
+            if recipe is None:
+                continue  # missing/unknown recipe id already flagged above
+            unmet = connected_apps.prerequisites_met(apps_ws, recipe["app"],
+                                                     recipe["prerequisites"])
+            if unmet:
+                labels = [schema.PREREQUISITE_LABELS.get(p, p) for p in unmet]
+                errors.append(f"action {ai + 1}: '{recipe['name']}' isn't buildable yet — "
+                              + "; ".join(labels))
 
     # ---- {{variable}} references in note bodies must name declared AI variables
     for ni, action in enumerate([] if "ai" in out_of_scope else actions):

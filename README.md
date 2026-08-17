@@ -19,27 +19,39 @@ decides what's legal, what's missing, what to ask, and when the rule is done.
 ├── engine/            the v2 copilot
 │   ├── schema.py         legal vocabulary: 7 triggers, 16 condition properties (+ per-
 │   │                     property operators, incl. ai_variable), 7 AI variable types,
-│   │                     10 actions (+ required params). Grounded in a 90-day dump of
-│   │                     real production automations.
+│   │                     11 actions (+ required params) incl. `connector` (v2.8, one
+│   │                     validated recipe). Grounded in a 90-day dump of real production
+│   │                     automations, plus (for the connector recipe) the one CSM
+│   │                     auto-assign example — see "Connector recipes" below.
 │   ├── extract.py        the only LLM call: conversation -> partial rule spec (strict
 │   │                     structured output; unknown slots stay null; unsupported asks
 │   │                     listed, never faked)
 │   ├── validator.py      pure code: enum/operator legality, trigger x condition
 │   │                     compatibility, required params, scope, and PROVENANCE — every
 │   │                     free-text value (tag, person, keyword) must appear in the user's
-│   │                     own words, or it's scrubbed and re-asked
+│   │                     own words, or it's scrubbed and re-asked. Also re-checks a
+│   │                     connector recipe's prerequisites (v2.8) against connected_apps.py.
 │   ├── workspace.py      entity resolution against a workspace fixture (workspace.json):
 │   │                     LLM lookup tools + the code-side re-verification of every model
 │   │                     lookup ("the model may look things up, code re-verifies")
+│   ├── connected_apps.py which third-party apps are connected + their prerequisite flags
+│   │   / salesforce_mock.py (v2.8) — mock Salesforce service the connector recipe calls
+│   ├── executor.py (v2.8) fires a connector recipe's chain for real (mocked), template-
+│   │                     filling {{variables}} between steps, capturing raw responses
+│   ├── features.py (v2.8) Track A: enabling an existing App feature — not an automation
 │   ├── copilot.py        turn loop + rendering: draft with ⟨required⟩ holes -> up to 3
-│   │                     planned questions per turn -> final WHEN/IF/THEN + machine JSON
-│   ├── serve2.py         chat UI (http://127.0.0.1:8001)
+│   │                     planned questions per turn -> final WHEN/IF/THEN + machine JSON.
+│   │                     Test-runs a completed connector rule before it's marked done.
+│   ├── serve2.py         Automations-panel chat UI (http://127.0.0.1:8001)
+│   ├── serve_apps.py (v2.8) Apps-panel entry point (http://127.0.0.1:8011), scoped to one
+│   │                     connected app — same engine, not a copy (see below)
 │   ├── cli.py            stdin -> stdout single turn (eval adapter)
 │   ├── simulate.py       multi-turn self-play: a simulator LLM plays the admin (knows the
 │   │                     target rule, opens vague, answers only what's asked, reviews the
 │   │                     result); deterministic grader judges accuracy, LLM judge scores
 │   │                     conversation quality
-│   └── test_validator.py schema coverage (all 40 core eval records must validate) + units
+│   ├── test_validator.py schema coverage (every core eval record must validate) + units
+│   └── test_connector.py (v2.8) connector recipe tests, pure code, no LLM/API key needed
 │
 ├── eval/              the measurement system
 │   ├── real-world-eval-set.jsonl   105 eval records mined from REAL production automations
@@ -47,6 +59,8 @@ decides what's legal, what's missing, what to ask, and when the rule is done.
 │   │                               the actual rule an admin built as ground truth, tagged
 │   │                               with scope_flags so the supported-surface decision stays
 │   │                               a scoring-time filter
+│   ├── connector-eval-set.jsonl (v2.8) 6 records for the one connector recipe (LLM-
+│   │                               dependent; not runnable without an OPENAI_API_KEY)
 │   ├── grader.py                   canonicalize both vocabularies -> per-slot diff
 │   │                               (trigger / conditions / actions / ai_extract)
 │   ├── run_eval.py                 capture-only runner (echo / any CLI / OpenAI prompt)
@@ -120,6 +134,36 @@ question). See `engine/README.md` for the full run-by-run history, including the
 each iteration caught — the 0/40 grader-vocab run and the 16/40 over-asking run are part of
 the story.
 
+## Connector recipes + Apps panel (v2.8, 2026-08-17)
+
+The product requirement: an admin configures an app-based automation from EITHER
+the Apps panel or the Automations panel — same underlying flow either way. So
+"Make an API call" / connector automations are now a first-class action type
+inside this ONE engine (one schema, one extractor, one validator, one executor),
+not a second engine that happens to look similar.
+
+**This is a single-example first pass.** Exactly one connector recipe is built
+and validated — Salesforce auto-assign to the account's CSM (Customer Success
+Manager) via its Account Team — plus one Track A (non-automation) example,
+viewing Salesforce account & contact details. No other recipes are stubbed in
+to make the design look more general than it is; more real production
+automations are coming as a golden dataset, and the mechanism (the `RECIPES`
+shape, the validator's prerequisite/provenance checks, the executor's chain
+runner) is built so that adding recipe #2 is "add a data entry + maybe a new
+mock service," not another architecture pass. Exactly which parts are
+genuinely generic vs. still shaped by having seen only this one example is
+called out in code comments throughout — see `engine/README.md`'s "Connector
+recipes + Apps panel" section and the comments directly on `schema.RECIPES`/
+`schema.FEATURES` for the specifics before building recipe #2.
+
+Testing: `engine/test_connector.py` covers happy path, the CSM-vs-AE role
+filter, the no-CSM clean failure, and provenance rejection — all pure code,
+runnable without an API key. `eval/connector-eval-set.jsonl` covers the
+extraction-routing half (matching the recipe vs. escalating everything else)
+but needs a live LLM call to run. Regression: the existing `test_validator.py`
+suite is unchanged by this work (56/56 core eval records, 58/58 units, before
+and after — this repo has moved past the 37/40 figure in the table above).
+
 ## Why the eval set is the interesting part
 
 Most copilot evals are hand-written and test what the author imagined. This one is mined
@@ -138,11 +182,15 @@ re-mining the eval set from a dump).
 ```bash
 export OPENAI_API_KEY=sk-...        # engine/extract.py also reads a sibling .env if present
 
-# chat UI
+# Automations panel
 cd engine && python serve2.py       # -> http://127.0.0.1:8001
+# Apps panel (v2.8) — same engine, scoped to one connected app
+cd engine && python serve_apps.py   # -> http://127.0.0.1:8011
 
 # tests (no API calls)
 cd engine && python test_validator.py
+cd engine && python test_connector.py   # connector recipe: happy path, role filter,
+                                         # no-CSM failure, provenance rejection
 cd eval   && python grader.py --self-test
 
 # single-turn eval

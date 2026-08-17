@@ -29,6 +29,7 @@ import os
 # through cli.py and keep the full capability.
 os.environ.setdefault("COPILOT_PILOT_SCOPE", "1")
 
+import connected_apps
 import copilot
 import extract
 import preview
@@ -37,6 +38,7 @@ import workspace as wsmod
 
 CLIENT = extract.make_client()
 WS = wsmod.load()
+APPS_WS = connected_apps.load()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -79,7 +81,8 @@ class Handler(BaseHTTPRequestHandler):
                 msgs = self._read_messages()
                 if msgs is None:
                     return self._send(400, {"error": "messages must end with a user turn"})
-                return self._send(200, copilot.respond_structured(CLIENT, msgs, ws=WS))
+                return self._send(200, copilot.respond_structured(CLIENT, msgs, ws=WS,
+                                                                  apps_ws=APPS_WS))
             except Exception as e:  # surface, don't crash the server
                 return self._send(500, {"error": f"{type(e).__name__}: {str(e)[:300]}"})
         if self.path == "/api/chat/stream":
@@ -118,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             emit({"type": "progress", "stage": "extracting"})
             state = copilot.respond_structured(
-                CLIENT, msgs, ws=WS,
+                CLIENT, msgs, ws=WS, apps_ws=APPS_WS,
                 on_event=lambda e: emit({"type": "progress", **e}))
             emit({"type": "result", **state})
         except Exception as e:

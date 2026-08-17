@@ -28,6 +28,11 @@ def _vocab_block():
             params.append(f"{pname}" + (f"={'|'.join(pspec['enum'])}"
                                         if pspec.get("enum") else ""))
         lines.append(f"  {a}: {', '.join(params)}")
+    lines.append("CONNECTOR RECIPES (legal values for the 'connector' action's `recipe` "
+                 "param — this is the COMPLETE list; nothing else exists, however plausible "
+                 "it sounds):")
+    for rid, r in schema.RECIPES.items():
+        lines.append(f"  {rid} ({r['app']}) — {r['description']}")
     lines.append("UNSUPPORTED (recognize, put in unsupported_requests, never emit as actions): "
                  + "; ".join(f"{k} ({v})" for k, v in schema.UNSUPPORTED.items()))
     return "\n".join(lines)
@@ -175,6 +180,19 @@ EXTRACTION RULES:
    filters on an existing tag, assignee or status, the trigger must be a reply
    or state-change trigger. Use the tag/assignee/status conditions — they are
    real; do not put them in unmappable.
+19. Connector recipes: the 'connector' action's `recipe` param is legal ONLY as
+   one of the CONNECTOR RECIPES ids listed above. There is currently exactly
+   ONE recipe — match it ONLY when the request clearly wants what its
+   description says (assigning/routing conversations to a Salesforce
+   Account's CSM). Do not get creative because little else is defined: a
+   request for ANY other connector/integration/CRM action — a different
+   Salesforce action, HubSpot, ClickUp, a generic "call our API", a webhook —
+   is NOT this recipe. For those, add "connector_other" reasoning to
+   unsupported_requests (never invent a fake recipe id, never leave `recipe`
+   null hoping the code will ask — with one recipe there is nothing to ask,
+   only a match or a clean escalation). test_contact_email is filled ONLY
+   from an email address the user actually wrote, exactly like any other
+   provenance-guarded value (rule 1).
 """
 
 RESPONSE_SCHEMA = {
@@ -218,10 +236,14 @@ RESPONSE_SCHEMA = {
                         "email_enabled": {"type": ["boolean", "null"]},
                         "inbox": {"type": ["string", "null"]},
                         "body_hint": {"type": ["string", "null"]},
+                        "recipe": {"type": ["string", "null"],
+                                  "enum": list(schema.RECIPES) + [None]},
+                        "test_contact_email": {"type": ["string", "null"]},
                     },
                     "required": ["type", "tags", "target", "targets", "status_value",
                                  "distribution", "content", "pinned",
-                                 "email_enabled", "inbox", "body_hint"],
+                                 "email_enabled", "inbox", "body_hint",
+                                 "recipe", "test_contact_email"],
                 },
             },
             "ai_extract": {

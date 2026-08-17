@@ -10,6 +10,7 @@ Unsupported asks are always named, never silently dropped or faked.
 import json
 
 import docent
+import executor
 import extract
 import schema
 import validator
@@ -76,6 +77,10 @@ def _render_action(a):
         return f"add to shared inbox {need(a.get('inbox'))}"
     if t == "remove_from_sm":
         return "remove from this shared inbox"
+    if t == "connector":
+        recipe = schema.RECIPES.get(a.get("recipe"))
+        name = recipe["name"] if recipe else need(a.get("recipe"))
+        return f"run connector recipe — {name}, test-run with {need(a.get('test_contact_email'))}"
     return t
 
 
@@ -148,6 +153,9 @@ def to_final_json(spec):
                             "detail": {"isSendMailEnabled": bool(a.get("email_enabled"))}})
         elif t in ("add_to_sm", "remove_from_sm"):
             actions.append({"type": t, "inboxes": [a["inbox"]] if a.get("inbox") else []})
+        elif t == "connector":
+            actions.append({"type": "connector", "recipe": a.get("recipe"),
+                            "test_contact_email": a.get("test_contact_email")})
     ai_vars = (spec.get("ai_extract") or {}).get("variables") or []
     var_by_name = {v["name"]: v for v in ai_vars if v.get("name")}
 
@@ -213,14 +221,29 @@ def _contributed(spec, last_text):
                for v in vals)
 
 
-def _turn(client, messages, model, ws, on_event=None):
+def connector_test_run(spec):
+    """If the (complete) spec contains a connector action, fire its recipe's
+    chain for real via executor.py using the test_contact_email the admin
+    supplied, and return the result. This is the connector analogue of the
+    draft -> final step every other action type already goes through: those
+    have no external side effect to verify before being marked done, so they
+    need no such check; a connector rule calls a real service, so it does.
+    Returns None when the spec has no connector action (the common case)."""
+    for a in spec.get("actions") or []:
+        if a.get("type") == "connector" and a.get("recipe") and a.get("test_contact_email"):
+            return executor.test_run(a["recipe"], a["test_contact_email"])
+    return None
+
+
+def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
     """Shared per-turn pipeline: extract -> validate -> scrub -> resolve."""
     user_msgs = [m["content"] for m in messages if m["role"] == "user"]
     convo_text = "\n".join(user_msgs)
     spec = extract.extract(client, messages, model, ws=ws, on_event=on_event)
     if on_event:
         on_event({"stage": "validating"})
-    result = validator.validate(spec, convo_text, ws=ws, user_messages=user_msgs)
+    result = validator.validate(spec, convo_text, ws=ws, user_messages=user_msgs,
+                                apps_ws=apps_ws)
     spec = validator.scrub(spec, result)
     spec = validator.apply_resolutions(spec, result)
     last_user = next((m["content"] for m in reversed(messages)
@@ -239,13 +262,15 @@ def _turn(client, messages, model, ws, on_event=None):
     return spec, result
 
 
-def respond_structured(client, messages, model=extract.MODEL, ws=None, on_event=None):
+def respond_structured(client, messages, model=extract.MODEL, ws=None, apps_ws=None,
+                       on_event=None):
     """One turn, machine-readable: everything a UI needs to render the state.
     Same pipeline as respond(); returns a dict instead of prose."""
-    spec, result = _turn(client, messages, model, ws, on_event=on_event)
+    spec, result = _turn(client, messages, model, ws, apps_ws=apps_ws, on_event=on_event)
     complete = result["status"] == "complete"
     return {
         "status": result["status"],
+        "test_run": connector_test_run(spec) if complete else None,
         "capability_answer": (docent.answer(spec["capability_question"])
                               if spec.get("capability_question") else None),
         "no_intent": spec.get("no_intent") or None,
@@ -268,11 +293,21 @@ def respond_structured(client, messages, model=extract.MODEL, ws=None, on_event=
     }
 
 
-def respond(client, messages, model=extract.MODEL, ws=None):
+def _render_test_run(test_run):
+    if test_run is None:
+        return None
+    if test_run["status"] == "ok":
+        return f"Test run: assigned to {test_run['final']['target']}."
+    if test_run["status"] == "no_match":
+        return f"Test run: nothing was assigned — {test_run['reason']}."
+    return f"Test run: couldn't complete — {test_run.get('reason', 'unknown error')}."
+
+
+def respond(client, messages, model=extract.MODEL, ws=None, apps_ws=None):
     """One turn. messages = full chat history [{role, content}]. Returns reply text.
     With a workspace, extraction may use lookup tools and the validator re-verifies
     every resolution against the user's own words."""
-    spec, result = _turn(client, messages, model, ws)
+    spec, result = _turn(client, messages, model, ws, apps_ws=apps_ws)
 
     is_followup = any(m["role"] == "assistant" for m in messages)
     last_user = (messages[-1]["content"].lower() if messages else "")
@@ -295,10 +330,13 @@ def respond(client, messages, model=extract.MODEL, ws=None):
         # answer first, from the schema; the rule state follows unchanged
         parts.append(docent.answer(spec["capability_question"]))
     if result["status"] == "complete":
+        test_run_line = _render_test_run(connector_test_run(spec))
         if closing and is_followup:
             # the user wrapped up — acknowledge and stop, don't repeat the pitch
             parts.append("All set — the rule is final as shown in the panel. "
                          "Build it in Hiver, and start a new chat for the next one.")
+            if test_run_line:
+                parts.append(test_run_line)
             parts.append("```json\n"
                          + json.dumps(to_final_json(spec), ensure_ascii=False, indent=1)
                          + "\n```")
@@ -315,6 +353,8 @@ def respond(client, messages, model=extract.MODEL, ws=None):
         if result.get("unmappable"):
             parts.append("Couldn't build into the rule: " + "; ".join(
                 f"{u['request']} ({u['why']})" for u in result["unmappable"]) + ".")
+        if test_run_line:
+            parts.append(test_run_line)
         parts.append("```json\n" + json.dumps(to_final_json(spec), ensure_ascii=False, indent=1)
                      + "\n```")
         parts.append("Want any adjustments?")

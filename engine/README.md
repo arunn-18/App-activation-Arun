@@ -21,15 +21,21 @@ the **model only extracts**, the **code decides**. Built 2026-08-07.
 
 | file | role |
 |---|---|
-| `schema.py` | The legal vocabulary (7 triggers, 16 condition properties + per-property ops incl. `ai_variable`, 7 AI variable types, 10 actions + required params), grounded in the 90d prod dump. `UNSUPPORTED` names what we recognize but don't build. |
-| `validator.py` | validate(spec, conversation, ws=None) → status/errors/missing/hallucinated/resolutions/entity_notes/questions. `scrub()` removes unproven values; `apply_resolutions()` rewrites resolved values to canonical workspace names. |
+| `schema.py` | The legal vocabulary (7 triggers, 16 condition properties + per-property ops incl. `ai_variable`, 7 AI variable types, 11 actions + required params), grounded in the 90d prod dump. `UNSUPPORTED` names what we recognize but don't build. `RECIPES` + `FEATURES` (v2.8) hold the connector/Track-A vocabulary — see below. |
+| `validator.py` | validate(spec, conversation, ws=None, apps_ws=None) → status/errors/missing/hallucinated/resolutions/entity_notes/questions. `scrub()` removes unproven values; `apply_resolutions()` rewrites resolved values to canonical workspace names. `apps_ws` (v2.8) re-checks a connector action's recipe prerequisites. |
 | `workspace.py` / `workspace.json` | Demo workspace fixture (tags, agents incl. two Johns, shared inboxes) + deterministic resolvers (exact / resolved / ambiguous / none), the LLM tool schemas, and `verified_source()` — the code-side re-check of every model lookup. |
-| `test_validator.py` | Schema coverage (all 40 core eval records must validate complete) + 10 unit cases. Run on every schema/validator change. |
-| `extract.py` | Extraction prompt + strict JSON schema + env/client helpers. |
-| `copilot.py` | Turn loop + rendering + grader-compatible final JSON. |
+| `connected_apps.py` / `connected_apps.json` (v2.8) | Which third-party apps are connected + their prerequisite flags (e.g. Salesforce Account Team enabled). Same load()/check split as workspace.py, kept separate because it's state about the APPS, not Hiver entities. |
+| `salesforce_mock.py` / `salesforce_fixture.json` (v2.8) | Mock Salesforce service for the one connector recipe: contact→account lookup, account-team-CSM lookup. Raw REST/SOQL-shaped response envelopes, so a test-run's captured responses look like what production would return. |
+| `executor.py` (v2.8) | Fires a `RECIPES` chain for real (against the mock service today): template-fills `{{variable}}` refs between steps, captures raw responses, stops cleanly (`status: no_match`) instead of throwing when a step can't produce what's needed. |
+| `features.py` (v2.8) | Track A: enabling an existing App feature (`schema.FEATURES`) — not an automation, no trigger/conditions/chain, Apps-panel-only. |
+| `test_validator.py` | Schema coverage (every core-scope eval record must validate complete) + unit cases. Run on every schema/validator change. |
+| `test_connector.py` (v2.8) | Pure-code connector tests: happy path, CSM-vs-AE role filter, no-CSM clean failure, provenance rejection, the downstream half of no-match escalation, plus Track A prerequisite gating. No LLM call, no API key needed. |
+| `extract.py` | Extraction prompt + strict JSON schema + env/client helpers. `RECIPES` vocab + routing rule (v2.8) added. |
+| `copilot.py` | Turn loop + rendering + grader-compatible final JSON. `connector_test_run()` (v2.8) fires a completed connector rule's recipe before it's shown as done. |
 | `cli.py` | stdin query → stdout reply (used by `../eval/run_eval.py --engine command`). |
-| `serve2.py` | Minimal chat UI at http://127.0.0.1:8001 (`../../automation-copilot/.venv/bin/python serve2.py`). |
-| `serve_api.py` | Structured JSON API at http://127.0.0.1:8010 (`respond_structured()`: status, spec, questions, resolutions, final rule). The Next.js playground at `~/sandbox/automation-copilot-ui` builds on it. |
+| `serve2.py` | Automations-panel chat UI at http://127.0.0.1:8001 (`../../automation-copilot/.venv/bin/python serve2.py`). Now also loads `connected_apps.json` so connector rules test-run from this panel too. |
+| `serve_api.py` | Structured JSON API at http://127.0.0.1:8010 (`respond_structured()`: status, spec, questions, resolutions, final rule, `test_run`). The Next.js playground at `~/sandbox/automation-copilot-ui` builds on it. |
+| `serve_apps.py` (v2.8) | Apps-panel entry point at http://127.0.0.1:8011, scoped to one connected app — Track A features + Track B recipes for that app. Imports the SAME schema/extract/validator/copilot/executor as the Automations panel; no forked engine. |
 
 ## Eval results (core-40, ../eval/)
 
@@ -237,6 +243,73 @@ validator accepted it. Two new validator layers, both pure code:
   assignee/inbox. Asking is safe where silent typo-correction wouldn't be.
 
 29/29 units; full sweep: core 37/40, mt 14/14, entity 10/10 (ai canary 11/18, in band).
+
+## Connector recipes + Apps panel (v2.8, 2026-08-17)
+
+**Product requirement:** an admin configures an app-based automation from EITHER
+the Apps panel or the Automations panel — it's the same underlying flow either
+way, so "Make an API call" / connector automations had to become a first-class
+action type INSIDE this engine (one schema, one extractor, one validator, one
+executor), not a second engine that happens to look similar.
+
+**Single-example scope — read this before adding recipe #2.** Everything below
+is built against exactly ONE validated example (Salesforce auto-assign to the
+account's CSM) plus one Track A example (viewing Salesforce account/contact
+details). No other recipes are stubbed in to make the design look more general
+than it is — that would hide, not reveal, what the mechanism actually handles.
+What IS meant to be general-purpose, and should not need another architecture
+pass when the golden dataset brings more real recipes:
+
+- **The `RECIPES` shape** (`schema.py`): id → app/name/description/chain/
+  prerequisites, with an ordered chain of `api_call`/`assign` steps and
+  `extract_variables` hand-offs between them. Adding recipe #2 is a data entry
+  here, plus a small mock service module if the app is new — see the
+  GENERIC/SHAPED-BY-ONE-EXAMPLE comments directly on `RECIPES` in schema.py for
+  exactly what does and doesn't generalize yet (only `api_call`/`assign` step
+  kinds exist; prerequisites are boolean flags, not configured values).
+- **The `connector` action type** (`schema.ACTIONS`): `recipe` (required,
+  enum-checked against `RECIPES` — the assign_among precedent: a structural
+  choice must be explicit, never inferred) + `test_contact_email` (this
+  recipe's ONE setup-time slot, provenance-guarded like any other free-text
+  value). Don't assume recipe #2 needs the same single-slot shape.
+- **The validator's prerequisite check** (`validator.py`): re-verifies the
+  chosen recipe's `prerequisites` against `connected_apps.py`'s fixture —
+  the same "never trust the model's own say-so" stance entity resolution
+  already gets. Fully data-driven off `recipe["prerequisites"]`.
+- **The executor's chain runner** (`executor.py`): template-fills `{{var}}`
+  refs, calls the recipe's app's mock service, extracts named variables from
+  raw responses, stops CLEANLY (`status: "no_match"`) rather than throwing
+  the moment a step can't produce what's needed — the no-CSM case is a real,
+  valid outcome, not an error.
+- **Track A** (`features.py`, `schema.FEATURES`): enabling an existing App
+  feature is NOT an automation (no trigger/conditions/chain) and has no
+  Automations-panel equivalent — kept as a genuinely separate, smaller
+  mechanism rather than bent into the rule-spec schema to reuse code that
+  doesn't fit it.
+
+**Two entry points, one engine:** `serve2.py` (Automations panel) now also
+loads `connected_apps.json` so a connector rule built there test-runs
+correctly; `serve_apps.py` (new — Apps panel) is scoped to one connected app
+and offers both Track A and Track B for it, importing the identical
+schema/extract/validator/copilot/executor modules — no forked logic. With
+only one app/recipe, "scoped to this app" is trivially true today; the
+`serve_apps.py` module docstring says exactly where an `app` filter needs to
+be threaded into `extract.build_system()`'s vocab block once a second app
+shows up, rather than guessing that shape now from a single data point.
+
+**Testing:** `test_connector.py` covers the five called-for cases —happy path,
+CSM-vs-AE role filter (an account with both roles must resolve to the CSM,
+never the AE), no-CSM clean failure, provenance rejection, and the downstream
+half of no-match escalation — all pure code, no LLM/API key required.
+`eval/connector-eval-set.jsonl` has 6 records for the LLM-dependent half
+(routing "assign new conversations to the account's CSM" onto the recipe, and
+NOT onto it for a different Salesforce action or a different app entirely) —
+not runnable in an environment without `OPENAI_API_KEY`/the `openai` package,
+which this build's sandbox has neither of; run it via `cli.py`/`run_eval.py`
+once a key is available. Regression: `test_validator.py`'s existing suite is
+unaffected (56/56 core, 58/58 units before and after — see the eval numbers
+posted with this change; the schema-coverage script here is on a version
+ahead of the README's original 37/40 snapshot).
 
 ## Next
 

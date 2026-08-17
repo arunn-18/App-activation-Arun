@@ -100,3 +100,22 @@ assertions are skipped for `--engine echo`, which replays ideals without a
 transcript. Covers: exact, casing-only, unique-fuzzy, ambiguous, unknown person
 (with recovery turn), unknown tag, mixed known/unknown tags, inbox+person,
 inbox+round-robin, and an invention bait.
+
+## Connector set (`connector-eval-set.jsonl`, added 2026-08-17)
+
+6 records for the one validated connector recipe (`engine/schema.RECIPES`:
+Salesforce auto-assign to the account's CSM). Requires `apps_ws` (`engine/
+connected_apps.py`'s fixture) threaded through the harness — `cli.py
+--apps-workspace` loads it, the same way `--workspace` loads `ws`.
+con-001/002/003 test that the
+recipe is matched (direct ask, drip-fed test-email slot, paraphrase without
+the literal words "CSM"/"auto-assign"); con-004/005 test that a DIFFERENT
+Salesforce action and a DIFFERENT app entirely both escalate to
+`unsupported_requests` rather than being forced onto the one recipe; con-006
+tests that "the account's CSM" alone (no literal "Salesforce") still routes
+confidently — there is only one CSM-routing recipe, so the ambiguity a
+broader vocabulary would have doesn't exist yet. Unlike the entity/multi-turn
+sets above, this one is NOT runnable in every environment: it needs a live
+LLM call (`OPENAI_API_KEY` + the `openai` package), neither of which this
+repo's dev sandbox had when the set was written — `engine/test_connector.py`
+covers the pure-code half (validator + executor) that doesn't need either.

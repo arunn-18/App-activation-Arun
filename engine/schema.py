@@ -135,10 +135,75 @@ def compat_error(trigger, prop):
                 "triggers (new_email_outgoing / new_conversation_outbound)")
     return None
 
+# ---------------------------------------------------------------------------
+# Connector recipes ("Make an API call" / app-based automations, v2.8)
+#
+# A recipe is a named, ordered CHAIN of steps against one third-party app.
+# Two step kinds today:
+#   api_call — {kind, op, args (may contain {{var}} refs), extract_variables}
+#              op names a function on that app's mock/real service; args are
+#              template-filled from variables collected so far;
+#              extract_variables pulls named fields out of the call's
+#              response into the variable namespace for LATER steps.
+#   assign   — {kind, target} terminal step; target is usually a {{var}} ref
+#              resolved from an earlier api_call's extracted variables.
+#
+# GENERIC (this shape is the mechanism — keep it for recipe #2+): the dict
+# shape (id -> app/name/description/chain/prerequisites), the extract_variables
+# hand-off between steps, and the prerequisites list of boolean flags all
+# generalize to any future app/recipe. Adding a recipe is a data entry here
+# plus (if the app has no mock yet) a small mock service module — no engine
+# code changes required. `list(RECIPES)` also drives the `recipe` enum on
+# ACTIONS["connector"] below, so a new entry is automatically legal vocabulary
+# for extraction and validation both.
+#
+# SHAPED BY HAVING SEEN ONLY ONE EXAMPLE (revisit once the golden dataset
+# lands more recipes):
+#   - every step is api_call or assign; a real recipe #2 might need a
+#     terminal action that isn't `assign` (tag, note, status) or a step that
+#     branches on the response — executor.py's chain runner only knows these
+#     two kinds today.
+#   - the CSM-vs-AE role filtering for this recipe happens INSIDE the mock
+#     service's op (get_account_team_csm queries "the CSM", not "the team"),
+#     not as generic chain logic — that keeps the executor simple, but it
+#     means recipe #2 needing real branching logic has no home yet; decide
+#     then whether that belongs in the chain shape or stays a mock-service
+#     detail.
+#   - prerequisites are plain boolean workspace-state flags. A recipe needing
+#     a configured VALUE (e.g. "which Salesforce field maps to X") doesn't fit
+#     this shape — don't stretch it; extend the prerequisite entry then.
+RECIPES = {
+    "salesforce_account_csm_autoassign": {
+        "app": "salesforce",
+        "name": "Auto-assign to the account's CSM (Salesforce)",
+        "description": ("When a new conversation arrives, look up the sender's Salesforce "
+                        "Account (via their Contact record) and assign the conversation to "
+                        "that Account's CSM (Customer Success Manager) from the Account Team."),
+        "chain": [
+            {"kind": "api_call", "op": "find_contact_by_email",
+             "args": {"email": "{{contact_email}}"},
+             "extract_variables": {"account_id": "account_id", "contact_id": "contact_id"}},
+            {"kind": "api_call", "op": "get_account_team_csm",
+             "args": {"account_id": "{{account_id}}"},
+             "extract_variables": {"csm_email": "email", "csm_name": "name"}},
+            {"kind": "assign", "target": "{{csm_email}}"},
+        ],
+        "prerequisites": ["salesforce_connected", "account_team_enabled"],
+    },
+}
+
+# prerequisite flag -> what it means, for error/status messages
+PREREQUISITE_LABELS = {
+    "salesforce_connected": "the Salesforce app must be connected",
+    "account_team_enabled": "Salesforce Account Team must be enabled with a CSM role",
+}
+
 # action type -> param spec.
 #   required:   must be non-empty before the rule is complete
 #   provenance: every value must literally appear in the user's own messages
 #   question:   what to ask when the param is missing
+#   enum_labels: optional {value: human label} for choice-question rendering
+#                (falls back to the raw enum value when absent)
 ACTIONS = {
     "add_tag": {
         "params": {"tags": {"list": True, "required": True, "provenance": True, "entity": "tag",
@@ -187,18 +252,78 @@ ACTIONS = {
                              "question": "Which shared inbox should the conversation be added to?"}}},
     "remove_from_sm": {
         "params": {"inbox": {"required": False}}},
+    # Connector action: fires an app recipe's chain (see RECIPES above). Like
+    # assign_among's distribution method, `recipe` is a structural choice the
+    # user's ask must land on explicitly — the model maps intent to a recipe
+    # id (extract.py routes on RECIPES' descriptions), but the id itself is
+    # required vocabulary, never inferred/defaulted when more than one recipe
+    # exists. With exactly one recipe today this rarely surfaces as a
+    # question in practice, but the check is real and generalizes as-is.
+    #
+    # test_contact_email is this recipe's ONE setup-time slot — a real contact
+    # address to test-run the chain against before the rule is marked done
+    # (see copilot.connector_test_run). It is genuinely customer-supplied, so
+    # it carries provenance like any other free-text value. Do NOT assume a
+    # future recipe needs this same single-slot shape — a recipe with its own
+    # config needs (see the RECIPES comment) needs its own param design; this
+    # is only what recipe #1 happens to need.
+    "connector": {
+        "params": {"recipe": {"required": True, "provenance": False,
+                              "enum": list(RECIPES),
+                              "enum_labels": {rid: r["name"] for rid, r in RECIPES.items()},
+                              "question": "Which app automation should this run?"},
+                   "test_contact_email": {"required": True, "provenance": True,
+                                          "question": "What's a real contact email address "
+                                                      "I can use to test this end-to-end "
+                                                      "before it's marked done?"}}},
 }
 
-# asks we recognize but don't build in v2.0 — name them, don't fake them
+# asks we recognize but don't build — name them, don't fake them
 UNSUPPORTED = {
     "custom_field": "setting or reading custom fields",
-    "connector": "connectors / HTTP calls / CRM integrations (Salesforce, HubSpot, ClickUp...)",
     "custom_object": "custom-object lookups",
     "approval": "approval flows",
     "sla": "SLA policies (separate feature, not an automation)",
+    # "connector" was removed from here in v2.8 — it is now a real, if
+    # narrow, ACTIONS entry (see RECIPES above). This entry covers every
+    # OTHER connector/integration ask, which still isn't buildable — named
+    # honestly instead of silently dropped, exactly like the rest of this
+    # dict. Do not fold recipe-matching asks in here.
+    "connector_other": ("connector automations other than the one currently supported "
+                        "recipe (Salesforce auto-assign to the account's CSM)"),
 }
 
 # quantifiers that count as an explicit "run on everything" statement;
 # bare plurals ("incoming emails") deliberately do NOT count
 ALL_MAIL_QUANTIFIERS = ["all ", "every ", "everything", "each ", "any email", "any conversation",
                         "any incoming", "todos", "alle "]
+
+
+# ---------------------------------------------------------------------------
+# Track A: "configure an existing App feature" — NOT an automation. No
+# trigger, no conditions, no action chain; it's a one-time on/off (or
+# one-time confirm) for a capability the app already has. Apps-panel-only —
+# the Automations panel has no equivalent to route this onto, so it is
+# deliberately NOT wired into ACTIONS/RECIPES above; see engine/features.py
+# for why it gets its own small module instead of being forced through the
+# rule-spec engine.
+#
+# GENERIC: the dict shape (id -> app/name/description/prerequisites) and the
+# prerequisite-flag check reuse the same mechanism as RECIPES' prerequisites,
+# on purpose — both ask the same question ("is this app connected and
+# configured enough to use?"). Adding a Track A feature is a data entry here.
+#
+# SHAPED BY ONE EXAMPLE: exactly one feature exists, and it needs no input
+# beyond "are the prerequisites met?" — no setup slot, no chat loop. A future
+# feature that needs the admin to pick or configure something (e.g. "which
+# fields to show") has no question-planning path built yet; mirror
+# validator.py's missing/provenance pattern then, don't invent one now.
+FEATURES = {
+    "salesforce_account_contact_details": {
+        "app": "salesforce",
+        "name": "View account & contact details",
+        "description": ("Show the sender's Salesforce Account and Contact details "
+                        "(company, owner, CSM, open cases) alongside the conversation."),
+        "prerequisites": ["salesforce_connected"],
+    },
+}
