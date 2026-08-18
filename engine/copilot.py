@@ -12,6 +12,7 @@ import json
 import docent
 import executor
 import extract
+import features
 import schema
 import validator
 
@@ -235,17 +236,71 @@ def connector_test_run(spec):
     return None
 
 
+def feature_request_result(spec, apps_ws):
+    """Track A: resolve an app_feature ask (extract.py rule 20) through
+    features.py, NOT validator.py — validator only understands the
+    automation rule shape (trigger/conditions/actions), and a Track A ask
+    has none of those by design. Returns None when this turn isn't Track A."""
+    fid = spec.get("app_feature")
+    if not fid:
+        return None
+    if apps_ws is None:
+        return {"status": "invalid", "feature_id": fid,
+                "errors": ["no connected-app context available"]}
+    result = features.enable_feature(fid, apps_ws)
+    result["feature_id"] = fid
+    return result
+
+
+def _empty_result(feature_result):
+    """A validator.validate()-shaped stand-in for the Track A path, so
+    respond()/respond_structured() can read result["status"]/["errors"] the
+    same way regardless of which track the turn took."""
+    return {
+        "status": feature_result["status"], "scope_pinned": False, "out_of_scope": [],
+        "assumptions": [], "unmappable": [], "errors": feature_result.get("errors", []),
+        "missing": [], "hallucinated": [], "unsupported": [], "resolutions": [],
+        "entity_notes": [], "questions": [], "questions_structured": [],
+        "questions_pending": 0, "feature_request": feature_result,
+    }
+
+
+def render_feature(spec, feature_result):
+    """Track A's analogue of render_structure(): Track A has no trigger,
+    conditions, or actions to render — just the one feature this turn
+    resolved and whether it's usable yet."""
+    fid = feature_result.get("feature_id") or spec.get("app_feature")
+    f = schema.FEATURES.get(fid, {})
+    name = f.get("name", fid or MISSING)
+    lines = [f"APP FEATURE  {name}"]
+    if f.get("description"):
+        lines.append(f.get("description"))
+    if feature_result["status"] == "complete":
+        lines.append("STATUS  Enabled")
+    else:
+        lines.append("STATUS  Can't enable yet — "
+                     + "; ".join(feature_result.get("errors", [])))
+    return "\n".join(lines)
+
+
 def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
-    """Shared per-turn pipeline: extract -> validate -> scrub -> resolve."""
+    """Shared per-turn pipeline: extract -> validate -> scrub -> resolve.
+    Track A (app_feature set) branches BEFORE the automation validator —
+    see feature_request_result()."""
     user_msgs = [m["content"] for m in messages if m["role"] == "user"]
     convo_text = "\n".join(user_msgs)
     spec = extract.extract(client, messages, model, ws=ws, on_event=on_event)
     if on_event:
         on_event({"stage": "validating"})
-    result = validator.validate(spec, convo_text, ws=ws, user_messages=user_msgs,
-                                apps_ws=apps_ws)
-    spec = validator.scrub(spec, result)
-    spec = validator.apply_resolutions(spec, result)
+    feature_result = feature_request_result(spec, apps_ws)
+    if feature_result is not None:
+        result = _empty_result(feature_result)
+    else:
+        result = validator.validate(spec, convo_text, ws=ws, user_messages=user_msgs,
+                                    apps_ws=apps_ws)
+        spec = validator.scrub(spec, result)
+        spec = validator.apply_resolutions(spec, result)
+        result["feature_request"] = None
     last_user = next((m["content"] for m in reversed(messages)
                       if m["role"] == "user"), "")
     if spec.get("closing") and _contributed(spec, last_user):
@@ -268,9 +323,12 @@ def respond_structured(client, messages, model=extract.MODEL, ws=None, apps_ws=N
     Same pipeline as respond(); returns a dict instead of prose."""
     spec, result = _turn(client, messages, model, ws, apps_ws=apps_ws, on_event=on_event)
     complete = result["status"] == "complete"
+    feature_result = result.get("feature_request")
     return {
         "status": result["status"],
-        "test_run": connector_test_run(spec) if complete else None,
+        "track": "feature" if feature_result is not None else "automation",
+        "feature_request": feature_result,
+        "test_run": connector_test_run(spec) if complete and feature_result is None else None,
         "capability_answer": (docent.answer(spec["capability_question"])
                               if spec.get("capability_question") else None),
         "no_intent": spec.get("no_intent") or None,
@@ -278,8 +336,9 @@ def respond_structured(client, messages, model=extract.MODEL, ws=None, apps_ws=N
         "done": bool(spec.get("closing")) and complete,
         "intent_summary": spec.get("intent_summary") or "",
         "spec": spec,
-        "rule": to_final_json(spec) if complete else None,
-        "draft": render_structure(spec),
+        "rule": to_final_json(spec) if complete and feature_result is None else None,
+        "draft": render_feature(spec, feature_result) if feature_result is not None
+                 else render_structure(spec),
         "assumptions": result.get("assumptions", []),
         "unmappable": result.get("unmappable", []),
         "questions": result["questions"],
@@ -308,6 +367,18 @@ def respond(client, messages, model=extract.MODEL, ws=None, apps_ws=None):
     With a workspace, extraction may use lookup tools and the validator re-verifies
     every resolution against the user's own words."""
     spec, result = _turn(client, messages, model, ws, apps_ws=apps_ws)
+
+    feature_result = result.get("feature_request")
+    if feature_result is not None:
+        # Track A: a completely different shape from an automation turn —
+        # no WHEN/IF/THEN, no questions loop, no closing/draft logic below,
+        # all of which assume a rule with a trigger.
+        if feature_result["status"] == "complete":
+            feat = feature_result["feature"]
+            return (f"{feat['name']} is set up — {feat['description']}\n\n"
+                    + render_feature(spec, feature_result))
+        return (render_feature(spec, feature_result)
+               + "\n\nThis isn't buildable yet in this workspace.")
 
     is_followup = any(m["role"] == "assistant" for m in messages)
     last_user = (messages[-1]["content"].lower() if messages else "")

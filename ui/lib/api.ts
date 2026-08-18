@@ -111,8 +111,23 @@ export interface ConnectorTestRun {
   reason?: string;
 }
 
+/** Track A result (engine/features.py): enabling an existing App feature.
+ *  NOT an automation — no trigger, no conditions, no chain. */
+export interface FeatureRequest {
+  status: "complete" | "invalid";
+  errors: string[];
+  feature_id?: string;
+  feature?: { id: string; app: string; name: string; description: string };
+}
+
 export interface TurnState {
   status: "complete" | "needs_info" | "invalid";
+  /** "feature" when this turn resolved an app_feature ask (Track A) instead
+   *  of building an automation rule — render a FeatureCard, not a RuleCard.
+   *  Defaults to "automation" when absent (older engine payloads). */
+  track?: "automation" | "feature";
+  /** set only when track === "feature". */
+  feature_request?: FeatureRequest | null;
   /** set only when the completed spec has a connector action — the real
    *  test-run result (engine/copilot.py connector_test_run), not present for
    *  any other rule type. */
@@ -278,9 +293,22 @@ export function hasQuestionForm(t: TurnState): boolean {
 }
 
 /** A turn worth rendering a rule card for: something was actually built or
- *  asked about. Gibberish turns render as prose only. */
+ *  asked about. Gibberish turns render as prose only. Track A turns (an
+ *  app_feature ask) render a FeatureCard instead — see hasFeatureCard —
+ *  never a RuleCard, since spec.trigger/actions are intentionally empty for
+ *  those (Track A has no trigger, no actions; see engine/extract.py rule 20). */
 export function hasRuleCard(t: TurnState): boolean {
-  return !t.no_intent || Boolean(t.spec.trigger) || t.spec.actions.length > 0;
+  return (
+    t.track !== "feature" &&
+    (!t.no_intent || Boolean(t.spec.trigger) || t.spec.actions.length > 0)
+  );
+}
+
+/** Track A: a turn worth rendering a FeatureCard for — an app_feature ask
+ *  the engine resolved through features.py rather than the automation
+ *  validator. */
+export function hasFeatureCard(t: TurnState): boolean {
+  return t.track === "feature" && t.feature_request != null;
 }
 
 // Compose the assistant reply from machine state. The rule card renders the
@@ -291,6 +319,15 @@ export function hasRuleCard(t: TurnState): boolean {
 export function assistantText(t: TurnState, lead = false): string {
   const parts: string[] = [];
   const intro = lead && t.intent_summary ? t.intent_summary : "";
+  if (t.track === "feature" && t.feature_request) {
+    // Track A: a completely different shape from an automation turn — no
+    // WHEN/IF/THEN, no questions loop. The FeatureCard renders the detail;
+    // this is just the lead-in line.
+    const fr = t.feature_request;
+    if (fr.status === "complete" && fr.feature)
+      return `${fr.feature.name} is set up — review it below.`;
+    return "This app feature isn't set up yet — see below for what's blocking it.";
+  }
   if (t.no_intent) {
     // nothing to build from — say so instead of rendering a hollow draft
     parts.push(

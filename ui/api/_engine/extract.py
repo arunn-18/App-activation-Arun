@@ -33,6 +33,10 @@ def _vocab_block():
                  "it sounds):")
     for rid, r in schema.RECIPES.items():
         lines.append(f"  {rid} ({r['app']}) — {r['description']}")
+    lines.append("APP FEATURES (Track A — legal values for `app_feature`; NOT automations, "
+                 "see rule 20 below; this is the COMPLETE list):")
+    for fid, f in schema.FEATURES.items():
+        lines.append(f"  {fid} ({f['app']}) — {f['description']}")
     lines.append("UNSUPPORTED (recognize, put in unsupported_requests, never emit as actions): "
                  + "; ".join(f"{k} ({v})" for k, v in schema.UNSUPPORTED.items()))
     return "\n".join(lines)
@@ -193,6 +197,23 @@ EXTRACTION RULES:
    only a match or a clean escalation). test_contact_email is filled ONLY
    from an email address the user actually wrote, exactly like any other
    provenance-guarded value (rule 1).
+20. Track A — app_feature: some asks are NOT automations at all — no trigger,
+   no per-conversation chain, just "turn on / show me / let me use an
+   existing app capability" (e.g. "set up Salesforce account cards for my
+   shared mailbox", "I want to see contact details from Salesforce on
+   conversations"). These match ONLY the APP FEATURES list above — set
+   `app_feature` to that id and leave trigger/condition_groups/actions at
+   their empty defaults (null/[]) — do NOT invent a trigger or actions just
+   because the schema has slots for them; this request has none. The
+   distinguishing signal is the ABSENCE of a "when X happens, do Y" shape:
+   if the user describes something that fires per conversation (a trigger),
+   that is Track B — use the connector action (rule 19) or the ordinary
+   rule vocabulary instead, never app_feature. An app-feature ask that
+   doesn't match any APP FEATURES entry is NOT app_feature either — leave it
+   null and record it in unmappable (rule 16) or unsupported_requests, the
+   same honest-gap handling as anything else outside the vocabulary. Never
+   set app_feature AND build rule content in the same turn — they are
+   mutually exclusive tracks.
 """
 
 RESPONSE_SCHEMA = {
@@ -271,6 +292,8 @@ RESPONSE_SCHEMA = {
             "closing": {"type": "boolean"},
             "capability_question": {"type": ["string", "null"]},
             "no_intent": {"type": ["string", "null"]},
+            "app_feature": {"type": ["string", "null"],
+                           "enum": list(schema.FEATURES) + [None]},
             "unmappable": {
                 "type": "array",
                 "items": {"type": "object", "additionalProperties": False,
@@ -282,7 +305,7 @@ RESPONSE_SCHEMA = {
         "required": ["intent_summary", "trigger", "scope_confirmed",
                      "condition_groups", "actions", "ai_extract",
                      "unsupported_requests", "closing", "capability_question",
-                     "unmappable", "no_intent"],
+                     "unmappable", "no_intent", "app_feature"],
     },
 }
 

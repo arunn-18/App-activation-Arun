@@ -15,7 +15,7 @@ ENGINE="${ENGINE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)/engine}"
 DEST="$(cd "$(dirname "$0")/.." && pwd)/api/_engine"
 
 # dev-only: local servers, eval CLI, fixture generator, tests
-EXCLUDE="serve_api.py serve2.py serve_apps.py cli.py simulate.py test_validator.py test_connector.py make_mailbox.py"
+EXCLUDE="serve_api.py serve2.py serve_apps.py cli.py simulate.py test_validator.py test_connector.py test_track_a.py make_mailbox.py"
 
 mkdir -p "$DEST"
 rm -f "$DEST"/*.py "$DEST"/*.json

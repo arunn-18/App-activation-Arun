@@ -311,6 +311,34 @@ unaffected (56/56 core, 58/58 units before and after — see the eval numbers
 posted with this change; the schema-coverage script here is on a version
 ahead of the README's original 37/40 snapshot).
 
+## Track A extraction routing fix (v2.8.1, 2026-08-18)
+
+A live end-to-end run surfaced a real bug the pure-code test suites above
+couldn't catch on their own: `extract.py` had no vocabulary for Track A at
+all, so a genuine Track A ask ("set up Salesforce account cards for my
+shared mailbox") was forced through the ONLY output shape the model knew —
+an automation `rule_spec` — and the copilot dutifully started asking "when
+should this run?" for a request that was never an automation.
+
+Fix, in the same spirit as the connector recipe's routing (rule 19): `extract.py`
+gained an `app_feature` field (rule 20) the model sets ONLY for asks matching
+`schema.FEATURES`, leaving trigger/conditions/actions at their empty
+defaults rather than inventing them. `copilot.py`'s `_turn()` now branches
+BEFORE the automation validator ever runs: `feature_request_result()`
+resolves an `app_feature` ask through `features.py` directly, and
+`validator.validate()` — which only understands the rule shape — never sees
+it. The UI got a real `FeatureCard` (distinct from `RuleCard`) so this
+renders as "app feature enabled/blocked," not a fake WHEN/IF/THEN draft with
+holes in it.
+
+`test_track_a.py` (new) pins this down in pure code: `app_feature` must
+route to the feature track, never emit a `rule` JSON, never ask an
+automation question, and win even if a spec somehow carried stray rule
+content alongside it (the mutual-exclusion the model is instructed to keep,
+verified independently of whether the model actually keeps it). 14/14
+passing. Full sweep after the fix: core 56/56, validator units 58/58,
+connector 30/30, track A 14/14 — no regressions.
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session

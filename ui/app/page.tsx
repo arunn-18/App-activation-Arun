@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
+import FeatureCard from "@/components/FeatureCard";
 import QuestionForm from "@/components/QuestionForm";
 import RuleCard from "@/components/RuleCard";
 import StreamedText from "@/components/StreamedText";
@@ -21,6 +22,7 @@ import {
   fetchVocabulary,
   fetchWorkspace,
   finalStepLabel,
+  hasFeatureCard,
   hasQuestionForm,
   hasRuleCard,
   progressLabel,
@@ -50,6 +52,8 @@ const EXAMPLES = [
   "assign every new incoming email to john",
   "auto-close everything that comes in from notifications@streamliner.example",
   "tag emails from acme.com appropriately",
+  "assign new conversations to the account's CSM automatically, test with jordan@acme.example",
+  "I want to see Salesforce account and contact details on conversations",
 ];
 
 // one greeting per visit, Claude-style — all ask the same question differently
@@ -475,6 +479,14 @@ export default function Playground() {
                     <div className="ml-auto w-fit max-w-[80%] whitespace-pre-wrap rounded-2xl bg-brand px-4 py-2 text-[13.5px] leading-relaxed text-white">
                       {m.content}
                     </div>
+                  )}
+                  {m.role === "assistant" &&
+                    i !== animateIdx &&
+                    session.work[i]?.turn &&
+                    hasFeatureCard(session.work[i].turn!) && (
+                    <FeatureCard
+                      featureRequest={session.work[i].turn!.feature_request!}
+                    />
                   )}
                   {m.role === "assistant" &&
                     i !== animateIdx &&
