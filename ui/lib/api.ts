@@ -111,13 +111,31 @@ export interface ConnectorTestRun {
   reason?: string;
 }
 
-/** Track A result (engine/features.py): enabling an existing App feature.
- *  NOT an automation — no trigger, no conditions, no chain. */
+/** Track A result (engine/features.resolve_setup()): a multi-turn guided
+ *  setup for an existing App feature — Authentication -> pick records ->
+ *  pick fields per record (from a live "describe" call) -> confirm. NOT an
+ *  automation — no trigger, no conditions, no chain. `status` mirrors
+ *  TurnState.status ("needs_info" mid-setup); questions/questions_structured
+ *  drive the SAME QuestionForm the automation flow uses. */
 export interface FeatureRequest {
-  status: "complete" | "invalid";
+  status: "complete" | "needs_info" | "invalid";
   errors: string[];
+  /** also carried at the top level (TurnState.questions/questions_structured)
+   *  — QuestionForm reads those; this copy is what assistantText's lead-in
+   *  line quotes. */
+  questions: string[];
   feature_id?: string;
-  feature?: { id: string; app: string; name: string; description: string };
+  feature?: {
+    id: string; app: string; name: string; description: string;
+    objects: string[]; fields_by_object: Record<string, string[]>;
+  };
+  /** what's been resolved so far, for a running summary — same spirit as
+   *  RuleCard showing partial WHEN/IF/THEN while slots are still open. */
+  progress?: {
+    connected?: boolean;
+    objects?: string[];
+    fields_by_object?: Record<string, string[]>;
+  };
 }
 
 export interface TurnState {
@@ -321,12 +339,17 @@ export function assistantText(t: TurnState, lead = false): string {
   const intro = lead && t.intent_summary ? t.intent_summary : "";
   if (t.track === "feature" && t.feature_request) {
     // Track A: a completely different shape from an automation turn — no
-    // WHEN/IF/THEN, no questions loop. The FeatureCard renders the detail;
-    // this is just the lead-in line.
+    // WHEN/IF/THEN. The FeatureCard renders the running setup progress;
+    // this is just the lead-in line + (mid-setup) the one open question,
+    // the questionnaire below carries the actual answer options.
     const fr = t.feature_request;
     if (fr.status === "complete" && fr.feature)
       return `${fr.feature.name} is set up — review it below.`;
-    return "This app feature isn't set up yet — see below for what's blocking it.";
+    if (fr.status === "invalid")
+      return "This isn't usable yet: " + fr.errors.join("; ") + ".";
+    return fr.questions.length
+      ? `To finish setting this up: ${fr.questions[0]}`
+      : "Setting this up — see below.";
   }
   if (t.no_intent) {
     // nothing to build from — say so instead of rendering a hollow draft

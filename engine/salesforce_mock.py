@@ -20,6 +20,8 @@ Salesforce API with the org's connected credentials.
 import json
 from pathlib import Path
 
+import schema
+
 DEFAULT_PATH = Path(__file__).parent / "salesforce_fixture.json"
 
 
@@ -62,3 +64,19 @@ def get_account_team(account_id, fixture=None):
     fixture = fixture if fixture is not None else load()
     matches = [m for m in fixture["account_team"] if m["account_id"] == account_id]
     return _envelope(matches)
+
+
+def describe_fields(object_name):
+    """Mock of a Salesforce object-describe call: standard + custom fields
+    for one object. Track A's "Field config - Read" step calls this per
+    object the admin selected, so the field list an admin picks from is
+    never a hardcoded guess — same "call an API, don't fake it" stance as
+    the rest of this mock service. Reads schema.FIELD_CATALOG so the legal
+    vocabulary extract.py knows about and what this call actually returns
+    can never drift apart."""
+    catalog = schema.FIELD_CATALOG.get(object_name)
+    if catalog is None:
+        return {"success": False, "object": object_name, "fields": []}
+    fields = ([{"name": f, "kind": "standard"} for f in catalog["standard"]]
+             + [{"name": f, "kind": "custom"} for f in catalog["custom"]])
+    return {"success": True, "object": object_name, "fields": fields}

@@ -36,3 +36,26 @@ def prerequisites_met(apps_ws, app, prerequisite_keys):
     simply satisfies none of its prerequisites."""
     flags = (apps_ws.get("connected_apps") or {}).get(app, {}).get("prerequisites") or {}
     return [p for p in prerequisite_keys if not flags.get(p)]
+
+
+def connect(apps_ws, app):
+    """Mock 'complete the connect/OAuth flow' action — the Authentication
+    step's one-click fix (schema.PREREQUISITE_ACTIONS). Flips `connected`
+    and every prerequisite flag ALREADY REGISTERED for this app to True, in
+    place, so the connection persists for the rest of this server process —
+    the same in-memory-only demo state as the rule log / workspace fixtures
+    elsewhere in this engine. Nothing is actually called against a real
+    Salesforce org.
+
+    SHAPED BY ONE EXAMPLE: this blanket-flips every registered prerequisite,
+    which is only correct because connecting Salesforce is this app's ONLY
+    interactive fix today (account_team_enabled has no CTA — it's assumed
+    already configured on the org and just starts true in the fixture). A
+    future prerequisite that represents a real third-party CONFIG step
+    (not fixable by "connect") needs its own action, not this blanket flip."""
+    entry = apps_ws.setdefault("connected_apps", {}).setdefault(
+        app, {"connected": False, "prerequisites": {}})
+    entry["connected"] = True
+    for p in entry.get("prerequisites", {}):
+        entry["prerequisites"][p] = True
+    return entry

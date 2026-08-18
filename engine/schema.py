@@ -198,6 +198,16 @@ PREREQUISITE_LABELS = {
     "account_team_enabled": "Salesforce Account Team must be enabled with a CSM role",
 }
 
+# prerequisite flag -> the one-click fix, when the flag can be satisfied by a
+# real (mocked) connect action rather than just a static error. `phrase` is
+# what a click composes into chat (connected_apps.connect() recognizes it via
+# copilot's Track A wiring); not every prerequisite has one yet (e.g.
+# account_team_enabled has no mock "enable Account Team" action -- it's
+# assumed already configured on the Salesforce side).
+PREREQUISITE_ACTIONS = {
+    "salesforce_connected": {"label": "Connect Salesforce", "phrase": "connect salesforce"},
+}
+
 # action type -> param spec.
 #   required:   must be non-empty before the rule is complete
 #   provenance: every value must literally appear in the user's own messages
@@ -313,11 +323,28 @@ ALL_MAIL_QUANTIFIERS = ["all ", "every ", "everything", "each ", "any email", "a
 # on purpose — both ask the same question ("is this app connected and
 # configured enough to use?"). Adding a Track A feature is a data entry here.
 #
-# SHAPED BY ONE EXAMPLE: exactly one feature exists, and it needs no input
-# beyond "are the prerequisites met?" — no setup slot, no chat loop. A future
-# feature that needs the admin to pick or configure something (e.g. "which
-# fields to show") has no question-planning path built yet; mirror
-# validator.py's missing/provenance pattern then, don't invent one now.
+# SHAPED BY ONE EXAMPLE (updated 2026-08-18 against the real product spec —
+# "Apps Activation Steps: Usecase-wise steps"): a Track A feature is now a
+# real guided flow, not a single yes/no check:
+#   1. Authentication      -- prerequisites, same mechanism as RECIPES'
+#   2. Record-level visibility config -- pick which objects to show
+#      (object_choices below), from the platform-wide out-of-the-box list
+#      (ALL_SUPPORTED_OBJECTS)
+#   3. Field config - Read -- for each chosen object, pick fields from a
+#      live "describe" call (FIELD_CATALOG / salesforce_mock.describe_fields)
+#      -- standard AND custom, proving the field list comes from an API call
+#      rather than a hardcoded guess
+#   4. Confirm & enable
+# See engine/features.py's resolve_setup() for the question-planning that
+# walks these in order, one blocking question at a time (mirrors
+# validator.py's discipline).
+#
+# STILL SHAPED BY ONE EXAMPLE: only Account/Contact have a FIELD_CATALOG
+# entry (this feature's own object_choices), and Field config - Write /
+# Prefill fields / Quick Access (the product spec's other listed steps)
+# are explicitly NOT built — they belong to "Managing CRM Records from
+# Hiver", a use case out of scope for this pass. Don't stretch this feature
+# to cover them.
 FEATURES = {
     "salesforce_account_contact_details": {
         "app": "salesforce",
@@ -325,5 +352,31 @@ FEATURES = {
         "description": ("Show the sender's Salesforce Account and Contact details "
                         "(company, owner, CSM, open cases) alongside the conversation."),
         "prerequisites": ["salesforce_connected"],
+        "object_choices": ["Account", "Contact"],
+    },
+}
+
+# The full out-of-the-box object list Salesforce's "Record-level visibility
+# config" step can offer, per the product spec — kept here for the NEXT
+# Track A feature (e.g. "Managing CRM Records from Hiver" would offer
+# Opportunity/Lead/Case too); only Account/Contact are wired to a
+# FIELD_CATALOG entry today, so only those are usable end to end.
+ALL_SUPPORTED_OBJECTS = ["Account", "Contact", "Opportunity", "Lead", "Case"]
+
+# Track A's "Field config - Read" step calls this catalog the way a real
+# integration would call Salesforce's object-describe API — standard AND
+# custom fields, so field selection is never a fixed hardcoded list. Only
+# Account/Contact are populated (the one feature that needs them); adding a
+# feature that uses Opportunity/Lead/Case needs their real field names
+# supplied the same way these were, not invented.
+FIELD_CATALOG = {
+    "Account": {
+        "standard": ["Account Name", "Account Website", "Account Owner",
+                     "Annual Revenue", "Number of Employees", "Phone"],
+        "custom": ["Renewal Date", "Health Score"],
+    },
+    "Contact": {
+        "standard": ["Contact Name", "Contact Email", "Contact Phone", "Contact Role"],
+        "custom": ["Preferred Language"],
     },
 }

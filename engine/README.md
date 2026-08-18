@@ -335,9 +335,68 @@ holes in it.
 route to the feature track, never emit a `rule` JSON, never ask an
 automation question, and win even if a spec somehow carried stray rule
 content alongside it (the mutual-exclusion the model is instructed to keep,
-verified independently of whether the model actually keeps it). 14/14
-passing. Full sweep after the fix: core 56/56, validator units 58/58,
-connector 30/30, track A 14/14 — no regressions.
+verified independently of whether the model actually keeps it). Full sweep
+after the fix: core 56/56, validator units 58/58, connector 30/30 — no
+regressions (this suite was superseded by the rebuild below one commit
+later, once real product requirements arrived).
+
+## Track A rebuild: a real multi-turn setup flow (v2.9, 2026-08-18)
+
+The v2.8.1 fix above was still wrong in a deeper way — it treated Track A as
+a single yes/no check ("are prerequisites met?"). The actual product spec
+("Apps Activation Steps: Usecase-wise steps", provided as a CSV) describes
+enabling a feature as a real guided flow:
+
+1. **Authentication** — connect the app (a one-time, per-workspace action)
+2. **Record-level visibility config** — pick which objects to show, from a
+   fixed out-of-the-box list (`schema.ALL_SUPPORTED_OBJECTS`)
+3. **Field config - Read** — for each chosen object, pick fields from a
+   *live describe call* (`salesforce_mock.describe_fields`, backed by
+   `schema.FIELD_CATALOG`) — standard AND custom fields, never a hardcoded
+   guess
+4. **Confirm & enable**
+
+`engine/features.py` was rewritten around `resolve_setup()`: a
+validator.py-style step-by-step resolver (one blocking question at a time,
+not up to 3 — this flow is inherently sequential) that walks these four
+steps using `feature_setup`, a new accumulated slot group in `extract.py`'s
+output (rule 21) filled the same way `condition_groups` accumulates for
+automations — re-derived from the WHOLE conversation every turn, not
+incremented. `connected_apps.py` gained a real `connect()` action (the
+Authentication CTA's mock "OAuth complete" — flips the connected-apps
+fixture in place, in-memory for the life of the server process, the same
+demo-state pattern as the rule log). The demo fixture (`connected_apps.json`)
+now starts **disconnected** by default so the Authentication step actually
+shows on a fresh run, instead of skipping straight past it.
+
+`copilot.py`'s Track A branch (`feature_request_result`/`render_feature`)
+now carries `progress` (connected? which objects/fields chosen so far?) the
+same way `render_structure()` shows partial WHEN/IF/THEN — and the UI's
+`FeatureCard` renders that running summary, while the connect/object/field/
+confirm QUESTIONS themselves reuse the exact same `QuestionForm` component
+the automation flow uses (no new UI question-rendering code needed — the
+component was already fully generic on `kind`/`multiple`/`options`).
+
+Scope for this pass, per direct product input: only the first TWO CRM use
+cases from the spec (Viewing account & contact details; Smart routing to
+right owner — unchanged, it's the existing CSM-autoassign recipe) are
+built. Field config - Write, Prefill fields, and Quick Access (listed in the
+spec for OTHER use cases — Managing CRM Records, Syncing conversations) are
+explicitly deferred, not half-built; `schema.py`'s FEATURES/FIELD_CATALOG
+comments say exactly what a future use case needs supplied (real field
+names, not invented ones) before it can be added.
+
+`test_track_a.py` was rewritten for the real flow: every step in isolation
+(auth gate, object validation against this feature's own choices, per-object
+field validation against the mock describe call, confirm), PLUS a full
+6-turn simulation through the real `copilot.respond_structured()` pipeline
+(only `extract.extract` stubbed) proving turn-over-turn accumulation works —
+connect, pick both records, fields for the first, fields for the second,
+confirm, enabled. 26/26 passing. Verified live via a browser walkthrough of
+the exact same 6 turns against the real UI, real `features.py`, real mock
+Salesforce describe calls. Full sweep: core 56/56, validator units 58/58,
+connector 27/27 (3 Track A checks moved out to test_track_a.py), track A
+26/26 — no regressions.
 
 ## Next
 

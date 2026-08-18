@@ -23,7 +23,9 @@ Endpoints:
                                     recipes, each flagged buildable/blocked
                                     against its prerequisites
   POST /api/apps/<app>/features/<feature_id>/enable
-                                    Track A: features.enable_feature()
+                                    Track A: features.resolve_setup() from a
+                                    clean start (see the /chat endpoint for
+                                    the real multi-turn flow)
   POST /api/apps/<app>/chat         Track B: {"messages":[...]} ->
                                     copilot.respond_structured(), scoped to
                                     this app (today: a no-op scope, since
@@ -96,8 +98,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         m = FEATURE_ENABLE_PATH.match(self.path)
         if m:
+            # Track A is a multi-turn setup (auth -> objects -> fields ->
+            # confirm), not a single-shot toggle — this REST shortcut just
+            # reports the first blocking question from a clean start; the
+            # real flow is the /chat endpoint below, which accumulates
+            # feature_setup across turns the same way copilot.py does.
             _, feature_id = m.groups()
-            return self._send(200, features.enable_feature(feature_id, APPS_WS))
+            return self._send(200, features.resolve_setup(feature_id, {}, APPS_WS))
         m = CHAT_PATH.match(self.path)
         if m:
             app = m.group(1)

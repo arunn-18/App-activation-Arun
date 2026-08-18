@@ -238,48 +238,64 @@ def connector_test_run(spec):
 
 def feature_request_result(spec, apps_ws):
     """Track A: resolve an app_feature ask (extract.py rule 20) through
-    features.py, NOT validator.py — validator only understands the
-    automation rule shape (trigger/conditions/actions), and a Track A ask
-    has none of those by design. Returns None when this turn isn't Track A."""
+    features.resolve_setup(), NOT validator.py — validator only understands
+    the automation rule shape (trigger/conditions/actions), and a Track A
+    ask has none of those by design. `feature_setup` (rule 21) carries the
+    accumulated setup slots (connect_requested, objects, per-object field
+    picks, confirm) the model re-derives from the WHOLE conversation each
+    turn, same recall discipline as condition_groups for automations.
+    Returns None when this turn isn't Track A at all."""
     fid = spec.get("app_feature")
     if not fid:
         return None
     if apps_ws is None:
-        return {"status": "invalid", "feature_id": fid,
-                "errors": ["no connected-app context available"]}
-    result = features.enable_feature(fid, apps_ws)
+        return {"status": "invalid", "feature_id": fid, "progress": {},
+                "errors": ["no connected-app context available"],
+                "questions": [], "questions_structured": []}
+    result = features.resolve_setup(fid, spec.get("feature_setup"), apps_ws)
     result["feature_id"] = fid
     return result
 
 
 def _empty_result(feature_result):
     """A validator.validate()-shaped stand-in for the Track A path, so
-    respond()/respond_structured() can read result["status"]/["errors"] the
-    same way regardless of which track the turn took."""
+    respond()/respond_structured() can read result["status"]/["questions"]/
+    etc. the same way regardless of which track the turn took."""
     return {
         "status": feature_result["status"], "scope_pinned": False, "out_of_scope": [],
         "assumptions": [], "unmappable": [], "errors": feature_result.get("errors", []),
         "missing": [], "hallucinated": [], "unsupported": [], "resolutions": [],
-        "entity_notes": [], "questions": [], "questions_structured": [],
+        "entity_notes": [], "questions": feature_result.get("questions", []),
+        "questions_structured": feature_result.get("questions_structured", []),
         "questions_pending": 0, "feature_request": feature_result,
     }
 
 
 def render_feature(spec, feature_result):
     """Track A's analogue of render_structure(): Track A has no trigger,
-    conditions, or actions to render — just the one feature this turn
-    resolved and whether it's usable yet."""
+    conditions, or actions to render — just this feature's setup progress
+    (connected? which objects/fields chosen so far?) and whether it's fully
+    enabled yet, the same "show what's known, mark what's open" spirit as
+    render_structure()'s ⟨holes⟩."""
     fid = feature_result.get("feature_id") or spec.get("app_feature")
     f = schema.FEATURES.get(fid, {})
     name = f.get("name", fid or MISSING)
     lines = [f"APP FEATURE  {name}"]
     if f.get("description"):
         lines.append(f.get("description"))
+    progress = feature_result.get("progress") or {}
+    if "connected" in progress:
+        lines.append("CONNECTED  " + ("yes" if progress["connected"] else MISSING))
+    if progress.get("objects"):
+        lines.append("RECORDS  " + ", ".join(progress["objects"]))
+    for obj, fields in (progress.get("fields_by_object") or {}).items():
+        lines.append(f"  {obj} FIELDS  " + ", ".join(fields))
     if feature_result["status"] == "complete":
         lines.append("STATUS  Enabled")
+    elif feature_result["status"] == "invalid":
+        lines.append("STATUS  Can't enable — " + "; ".join(feature_result.get("errors", [])))
     else:
-        lines.append("STATUS  Can't enable yet — "
-                     + "; ".join(feature_result.get("errors", [])))
+        lines.append("STATUS  In progress")
     return "\n".join(lines)
 
 
@@ -371,14 +387,25 @@ def respond(client, messages, model=extract.MODEL, ws=None, apps_ws=None):
     feature_result = result.get("feature_request")
     if feature_result is not None:
         # Track A: a completely different shape from an automation turn —
-        # no WHEN/IF/THEN, no questions loop, no closing/draft logic below,
-        # all of which assume a rule with a trigger.
+        # no WHEN/IF/THEN, no closing logic below (all of which assume a
+        # rule with a trigger) — but it DOES have its own one-question-at-a-
+        # time loop (features.resolve_setup), rendered the same "closest
+        # known state, then what's next" way as the automation path.
         if feature_result["status"] == "complete":
             feat = feature_result["feature"]
             return (f"{feat['name']} is set up — {feat['description']}\n\n"
                     + render_feature(spec, feature_result))
-        return (render_feature(spec, feature_result)
-               + "\n\nThis isn't buildable yet in this workspace.")
+        parts = [render_feature(spec, feature_result)]
+        if feature_result["status"] == "invalid":
+            parts.append("This isn't usable yet in this workspace: "
+                         + "; ".join(feature_result.get("errors", [])) + ".")
+            return "\n\n".join(parts)
+        if feature_result.get("errors"):
+            parts.append("Couldn't use that: " + "; ".join(feature_result["errors"]) + ".")
+        qs = feature_result.get("questions") or []
+        if qs:
+            parts.append(f"To finish setting this up: {qs[0]}")
+        return "\n\n".join(parts)
 
     is_followup = any(m["role"] == "assistant" for m in messages)
     last_user = (messages[-1]["content"].lower() if messages else "")

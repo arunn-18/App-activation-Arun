@@ -4,26 +4,41 @@ import type { FeatureRequest } from "@/lib/api";
 
 const STATUS_STYLE: Record<FeatureRequest["status"], string> = {
   complete: "bg-bone text-ink",
+  needs_info: "bg-bone text-ink-soft",
   invalid: "bg-destructive-soft text-destructive",
 };
 const STATUS_LABEL: Record<FeatureRequest["status"], string> = {
   complete: "Enabled",
+  needs_info: "Setting up",
   invalid: "Blocked",
 };
 
-/** Track A's card — an app_feature ask (engine/schema.py FEATURES), resolved
- *  through engine/features.py rather than the automation validator. Kept as
- *  its own small component rather than a RuleCard variant: there is no
- *  trigger/conditions/actions to render, no draft-vs-final distinction, and
- *  no "apply this rule" step — a feature is either usable now (its
- *  prerequisites are met) or it isn't, and that's the whole card. */
+// The engine has no vocabulary endpoint for feature display names yet
+// (only trigger/property labels, via /api/vocabulary) — same fallback
+// pattern RuleCard uses for the connector recipe's name.
+const FEATURE_NAMES: Record<string, string> = {
+  salesforce_account_contact_details: "View account & contact details",
+};
+
+/** Track A's card — a real multi-turn setup (engine/features.resolve_setup:
+ *  Authentication -> pick records -> pick fields per record -> confirm),
+ *  not a single yes/no check. Kept as its own component rather than a
+ *  RuleCard variant: there is no trigger/conditions/actions to render, and
+ *  progress accumulates as objects/objects+fields rather than WHEN/IF/THEN.
+ *  The actual questions (connect CTA, record picker, field picker, confirm)
+ *  render below this card via the SAME QuestionForm the automation flow
+ *  uses — this card is the running summary, not the input. */
 export default function FeatureCard({
   featureRequest,
 }: {
   featureRequest: FeatureRequest;
 }) {
   const feat = featureRequest.feature;
-  const name = feat?.name ?? featureRequest.feature_id ?? "App feature";
+  const progress = featureRequest.progress ?? {};
+  const name =
+    feat?.name ?? FEATURE_NAMES[featureRequest.feature_id ?? ""] ?? "App feature";
+  const fieldsByObject = feat?.fields_by_object ?? progress.fields_by_object ?? {};
+  const objects = feat?.objects ?? progress.objects ?? [];
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline bg-card">
@@ -46,6 +61,33 @@ export default function FeatureCard({
           </p>
         )}
       </div>
+
+      {(progress.connected != null || objects.length > 0) && (
+        <div className="space-y-1.5 border-t border-hairline px-4 py-3 text-[12.5px]">
+          <p className="text-ink-soft">
+            <span className="font-mono text-[11px] font-semibold text-muted-foreground">
+              CONNECTED
+            </span>{" "}
+            {progress.connected ? "yes" : "not yet"}
+          </p>
+          {objects.length > 0 && (
+            <p className="text-ink-soft">
+              <span className="font-mono text-[11px] font-semibold text-muted-foreground">
+                RECORDS
+              </span>{" "}
+              {objects.join(", ")}
+            </p>
+          )}
+          {Object.entries(fieldsByObject).map(([obj, fields]) => (
+            <p key={obj} className="text-ink-soft">
+              <span className="font-mono text-[11px] font-semibold text-muted-foreground">
+                {obj.toUpperCase()} FIELDS
+              </span>{" "}
+              {fields.join(", ")}
+            </p>
+          ))}
+        </div>
+      )}
 
       {featureRequest.status === "invalid" && featureRequest.errors.length > 0 && (
         <div className="border-t border-hairline bg-destructive-soft px-4 py-2.5">

@@ -21,8 +21,9 @@ an unsupported_requests entry once extraction produces one. See the
 LLM-dependent sibling (eval/connector-eval-set.jsonl via cli.py) once a key
 is available to close the loop end to end.
 
-Also covers Track A (features.py) prerequisite gating, since it shares the
-same connected_apps.py mechanism as the connector's prerequisite checks.
+Track A (features.py) has its own, much larger suite now — see
+test_track_a.py — since it's a multi-turn setup flow, not a single
+prerequisite check.
 
 Run: python3 test_connector.py
 """
@@ -30,13 +31,27 @@ import sys
 
 import connected_apps
 import executor
-import features
 import salesforce_mock
 import schema
 import validator
 
-APPS_WS = connected_apps.load()
 RECIPE_ID = "salesforce_account_csm_autoassign"
+
+
+def _connected_ws():
+    """connected_apps.json now starts DISCONNECTED by default (2026-08-18 —
+    the real product flow needs an Authentication step to actually show),
+    so connector tests that assume prerequisites are already met build their
+    own fully-connected copy rather than relying on the shared fixture."""
+    ws = connected_apps.load()
+    entry = ws["connected_apps"]["salesforce"]
+    entry["connected"] = True
+    for p in entry["prerequisites"]:
+        entry["prerequisites"][p] = True
+    return ws
+
+
+APPS_WS = _connected_ws()
 
 
 def _connector_spec(test_contact_email):
@@ -161,16 +176,6 @@ def run():
           recipe_q and recipe_q["options"]
           and recipe_q["options"][0]["value"] != RECIPE_ID
           and "CSM" in recipe_q["options"][0]["value"])
-
-    # ---- Track A: feature prerequisite gating (shares connected_apps.py) ----
-    ok = features.enable_feature("salesforce_account_contact_details", APPS_WS)
-    check("Track A: enables when prerequisites are met", ok["status"] == "complete")
-    disconnected_ws = {"connected_apps": {}}
-    blocked = features.enable_feature("salesforce_account_contact_details", disconnected_ws)
-    check("Track A: blocked when Salesforce isn't connected", blocked["status"] == "invalid")
-    unknown = features.enable_feature("not_a_real_feature", APPS_WS)
-    check("Track A: unknown feature id is an error, not a silent no-op",
-          unknown["status"] == "invalid")
 
     print(f"connector unit cases: {units - fails}/{units} passed")
     print("PASS" if fails == 0 else f"FAIL ({fails})")

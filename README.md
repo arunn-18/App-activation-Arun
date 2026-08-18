@@ -52,7 +52,7 @@ decides what's legal, what's missing, what to ask, and when the rule is done.
 │   │                     conversation quality
 │   ├── test_validator.py schema coverage (every core eval record must validate) + units
 │   ├── test_connector.py (v2.8) connector recipe tests, pure code, no LLM/API key needed
-│   └── test_track_a.py (v2.8.1) Track A routing tests, pure code, no LLM/API key needed
+│   └── test_track_a.py (v2.9) Track A multi-turn setup flow tests, pure code
 │
 ├── eval/              the measurement system
 │   ├── real-world-eval-set.jsonl   105 eval records mined from REAL production automations
@@ -165,16 +165,24 @@ but needs a live LLM call to run. Regression: the existing `test_validator.py`
 suite is unchanged by this work (56/56 core eval records, 58/58 units, before
 and after — this repo has moved past the 37/40 figure in the table above).
 
-**Track A routing fix (v2.8.1):** a live run surfaced a real bug — Track A
-had backend logic (`schema.FEATURES`, `features.py`) but no conversational
-front door, so a genuine Track A ask ("set up Salesforce account cards for
-my shared mailbox") got forced into a fake automation draft asking "when
-should this run?". Fixed by giving `extract.py` an `app_feature` field
-(never inferring a trigger/actions for Track A asks) and having `copilot.py`
-route it to `features.py` before the automation validator ever runs. The UI
-now renders a distinct `FeatureCard` instead of a `RuleCard` with holes in
-it. `engine/test_track_a.py` (new, 14/14) pins the routing down in pure code
-— see `engine/README.md`'s "Track A extraction routing fix" section.
+**Track A rebuild (v2.9):** two live runs surfaced real problems, fixed in
+sequence. First, Track A had backend logic but no conversational front
+door, so a genuine ask ("set up Salesforce account cards") got forced into
+a fake automation draft asking "when should this run?" — fixed by giving
+`extract.py` an `app_feature` field routed to `features.py` before the
+automation validator ever runs. Second, once real product requirements
+arrived (a CSV: "Apps Activation Steps — Usecase-wise steps"), Track A
+itself was rebuilt as a real 4-step guided flow — Authentication, pick
+records to show, pick fields per record (from a mocked live "describe"
+call, standard + custom), confirm & enable — not a single yes/no check.
+`engine/features.py`'s `resolve_setup()` walks these one blocking question
+at a time; the UI's `FeatureCard` shows the running setup progress, reusing
+the same `QuestionForm` component the automation flow already had.
+`engine/test_track_a.py` (26/26) covers every step plus a full 6-turn
+accumulation simulation through the real pipeline — see `engine/README.md`'s
+"Track A rebuild" section for the full story, including which product-spec
+steps (Field config - Write, Prefill fields, Quick Access) are explicitly
+deferred to a use case out of scope for this pass.
 
 ## Why the eval set is the interesting part
 
@@ -203,8 +211,8 @@ cd engine && python serve_apps.py   # -> http://127.0.0.1:8011
 cd engine && python test_validator.py
 cd engine && python test_connector.py   # connector recipe: happy path, role filter,
                                          # no-CSM failure, provenance rejection
-cd engine && python test_track_a.py     # Track A: routes to features.py, never
-                                         # a fake automation draft
+cd engine && python test_track_a.py     # Track A: the 4-step setup flow
+                                         # (auth, records, fields, confirm)
 cd eval   && python grader.py --self-test
 
 # single-turn eval

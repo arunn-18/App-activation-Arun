@@ -1,9 +1,9 @@
 {
   "connected_apps": {
     "salesforce": {
-      "connected": true,
+      "connected": false,
       "prerequisites": {
-        "salesforce_connected": true,
+        "salesforce_connected": false,
         "account_team_enabled": true
       }
     }
