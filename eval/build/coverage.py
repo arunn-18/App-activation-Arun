@@ -15,7 +15,7 @@ from pathlib import Path
 
 csv.field_size_limit(sys.maxsize)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "engine"))
-import schema  # noqa: E402
+from automation import schema  # noqa: E402
 
 DIR = sys.argv[1] if len(sys.argv) > 1 else \
     "/Users/mithilverma/Downloads/automations_sync_triggers_dump_90d"

@@ -47,11 +47,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import connected_apps
 import copilot
-import extract
-import features
-import schema
+import router
+from apps import setup as features
+from automation import schema
 
-CLIENT = extract.make_client()
+CLIENT = router.make_client()
 APPS_WS = connected_apps.load()
 
 APP_PATH = re.compile(r"^/api/apps/([^/]+)$")

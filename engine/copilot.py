@@ -1,20 +1,27 @@
-"""v2 turn loop: extract -> validate -> ask or finalize.
-
-Reply contract (what the user sees each turn):
+"""Outer turn loop: router -> (automation | app_setup) extraction -> resolve
+-> render. Reply contract (what the user sees each turn):
   needs_info -> the closest legal draft with what's-known filled in, missing slots
-                marked, and up to 3 planned questions
-  complete   -> the final legal structure (prose WHEN/IF/THEN + machine JSON)
+                marked, and up to 3 planned questions (automation) or 1 (app_setup)
+  complete   -> the final legal structure (prose + machine JSON, or "enabled")
   invalid    -> honest statement of what couldn't be mapped
 Unsupported asks are always named, never silently dropped or faked.
+
+router.classify() decides FIRST which track a turn is in; only THEN does the
+matching package's own extractor/resolver run — automation/ (trigger,
+conditions, actions, connector recipes) and apps/ (Track A feature setup)
+are genuine peers that don't know about each other. This file is the only
+place that talks to both.
 """
 import json
 
 import docent
-import executor
-import extract
-import features
-import schema
-import validator
+import router
+from apps import extract as apps_extract
+from apps import setup as apps_setup
+from automation import executor as automation_executor
+from automation import extract as automation_extract
+from automation import schema as automation_schema
+from automation import validator as automation_validator
 
 MISSING = "⟨required — not provided yet⟩"
 
@@ -37,7 +44,7 @@ def _render_condition(c):
         vals = ", ".join(f"'{v}'" for v in c.get("values", [])) or MISSING
         return f"AI:{name} {c['op']} {vals}"
     vals = ", ".join(f"'{v}'" for v in c.get("values", [])) or MISSING
-    prop = schema.PROPERTY_LABELS.get(c["property"], c["property"])
+    prop = automation_schema.PROPERTY_LABELS.get(c["property"], c["property"])
     return f"{prop} {c['op']} {vals}"
 
 
@@ -79,7 +86,7 @@ def _render_action(a):
     if t == "remove_from_sm":
         return "remove from this shared inbox"
     if t == "connector":
-        recipe = schema.RECIPES.get(a.get("recipe"))
+        recipe = automation_schema.RECIPES.get(a.get("recipe"))
         name = recipe["name"] if recipe else need(a.get("recipe"))
         return f"run connector recipe — {name}, test-run with {need(a.get('test_contact_email'))}"
     return t
@@ -89,8 +96,8 @@ def render_structure(spec):
     lines = []
     trig = spec.get("trigger")
     # builder vocabulary, not internal ids — users verify in the language they know
-    lines.append("WHEN  " + (schema.TRIGGER_LABELS.get(trig, trig)
-                             if trig in schema.TRIGGERS else MISSING))
+    lines.append("WHEN  " + (automation_schema.TRIGGER_LABELS.get(trig, trig)
+                             if trig in automation_schema.TRIGGERS else MISSING))
     ai_vars = (spec.get("ai_extract") or {}).get("variables") or []
     if ai_vars:
         lines.append("AI    extract per conversation:\n      " + "\n      ".join(
@@ -204,9 +211,10 @@ def _norm_key(s):
 
 
 def _contributed(spec, last_text):
-    """Does any rule value appear in the given message? Then that message added
-    content and cannot be a closing — the code gate behind extraction rule 13,
-    which the model alone gets wrong ('use the Urgent tag, thanks!' -> mt-014)."""
+    """Does any AUTOMATION rule value appear in the given message? Then that
+    message added content and cannot be a closing — the code gate behind
+    extraction rule 13, which the model alone gets wrong ('use the Urgent
+    tag, thanks!' -> mt-014)."""
     norm = " ".join(str(last_text).split()).lower()
     vals = []
     for g in spec.get("condition_groups") or []:
@@ -222,43 +230,57 @@ def _contributed(spec, last_text):
                for v in vals)
 
 
+def _contributed_app_setup(spec, last_text):
+    """The apps/ (Track A) analogue of _contributed(): did the given message
+    name a record or field that's now in the accumulated setup? Booleans
+    (connect_requested/confirm) aren't checked here, same as _contributed()
+    never checks booleans like `pinned` — there's no literal value to match
+    against the message text."""
+    norm = " ".join(str(last_text).split()).lower()
+    vals = []
+    for k in ("objects", "account_fields", "contact_fields"):
+        vals += spec.get(k) or []
+    return any(str(v).strip() and " ".join(str(v).split()).lower() in norm
+               for v in vals)
+
+
 def connector_test_run(spec):
-    """If the (complete) spec contains a connector action, fire its recipe's
-    chain for real via executor.py using the test_contact_email the admin
-    supplied, and return the result. This is the connector analogue of the
-    draft -> final step every other action type already goes through: those
-    have no external side effect to verify before being marked done, so they
-    need no such check; a connector rule calls a real service, so it does.
-    Returns None when the spec has no connector action (the common case)."""
+    """If the (complete) automation spec contains a connector action, fire
+    its recipe's chain for real via automation/executor.py using the
+    test_contact_email the admin supplied, and return the result. This is
+    the connector analogue of the draft -> final step every other action
+    type already goes through: those have no external side effect to verify
+    before being marked done, so they need no such check; a connector rule
+    calls a real service, so it does. Returns None when the spec has no
+    connector action (the common case)."""
     for a in spec.get("actions") or []:
         if a.get("type") == "connector" and a.get("recipe") and a.get("test_contact_email"):
-            return executor.test_run(a["recipe"], a["test_contact_email"])
+            return automation_executor.test_run(a["recipe"], a["test_contact_email"])
     return None
 
 
-def feature_request_result(spec, apps_ws):
-    """Track A: resolve an app_feature ask (extract.py rule 20) through
-    features.resolve_setup(), NOT validator.py — validator only understands
-    the automation rule shape (trigger/conditions/actions), and a Track A
-    ask has none of those by design. `feature_setup` (rule 21) carries the
-    accumulated setup slots (connect_requested, objects, per-object field
-    picks, confirm) the model re-derives from the WHOLE conversation each
-    turn, same recall discipline as condition_groups for automations.
-    Returns None when this turn isn't Track A at all."""
-    fid = spec.get("app_feature")
+def feature_request_result(app_spec, apps_ws):
+    """Track A: resolve an app_setup turn through apps.setup.resolve_setup()
+    — a genuine peer of automation_validator.validate(), not a branch off
+    of it. `app_spec` (from apps/extract.py) IS the feature_setup shape
+    resolve_setup() expects (connect_requested/objects/account_fields/
+    contact_fields/confirm), plus `feature` naming which one. Returns None
+    when app_spec has no feature match at all (an app_setup-routed turn that
+    still couldn't match any FEATURES entry — see apps/extract.py rule 8)."""
+    fid = app_spec.get("feature")
     if not fid:
         return None
     if apps_ws is None:
         return {"status": "invalid", "feature_id": fid, "progress": {},
                 "errors": ["no connected-app context available"],
                 "questions": [], "questions_structured": []}
-    result = features.resolve_setup(fid, spec.get("feature_setup"), apps_ws)
+    result = apps_setup.resolve_setup(fid, app_spec, apps_ws)
     result["feature_id"] = fid
     return result
 
 
 def _empty_result(feature_result):
-    """A validator.validate()-shaped stand-in for the Track A path, so
+    """A validate()-shaped stand-in for the Track A path, so
     respond()/respond_structured() can read result["status"]/["questions"]/
     etc. the same way regardless of which track the turn took."""
     return {
@@ -271,14 +293,15 @@ def _empty_result(feature_result):
     }
 
 
-def render_feature(spec, feature_result):
-    """Track A's analogue of render_structure(): Track A has no trigger,
+def render_feature(feature_result):
+    """apps/'s analogue of render_structure(): Track A has no trigger,
     conditions, or actions to render — just this feature's setup progress
     (connected? which objects/fields chosen so far?) and whether it's fully
     enabled yet, the same "show what's known, mark what's open" spirit as
     render_structure()'s ⟨holes⟩."""
-    fid = feature_result.get("feature_id") or spec.get("app_feature")
-    f = schema.FEATURES.get(fid, {})
+    from apps import schema as apps_schema
+    fid = feature_result.get("feature_id")
+    f = apps_schema.FEATURES.get(fid, {})
     name = f.get("name", fid or MISSING)
     lines = [f"APP FEATURE  {name}"]
     if f.get("description"):
@@ -300,30 +323,55 @@ def render_feature(spec, feature_result):
 
 
 def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
-    """Shared per-turn pipeline: extract -> validate -> scrub -> resolve.
-    Track A (app_feature set) branches BEFORE the automation validator —
-    see feature_request_result()."""
-    user_msgs = [m["content"] for m in messages if m["role"] == "user"]
-    convo_text = "\n".join(user_msgs)
-    spec = extract.extract(client, messages, model, ws=ws, on_event=on_event)
+    """Shared per-turn pipeline: router decides the track, then that track's
+    OWN extract -> resolve pipeline runs. Returns (spec, result) where
+    result["feature_request"] is set (non-None) for an app_setup turn and
+    None for an automation turn — respond()/respond_structured() branch on
+    that, unchanged from before this file's tracks were split into
+    packages."""
     if on_event:
-        on_event({"stage": "validating"})
-    feature_result = feature_request_result(spec, apps_ws)
-    if feature_result is not None:
-        result = _empty_result(feature_result)
-    else:
-        result = validator.validate(spec, convo_text, ws=ws, user_messages=user_msgs,
-                                    apps_ws=apps_ws)
-        spec = validator.scrub(spec, result)
-        spec = validator.apply_resolutions(spec, result)
-        result["feature_request"] = None
+        on_event({"stage": "routing"})
+    route = router.classify(client, messages, model)
     last_user = next((m["content"] for m in reversed(messages)
                       if m["role"] == "user"), "")
-    if spec.get("closing") and _contributed(spec, last_user):
-        spec["closing"] = False
-    # capability questions: the model only classifies; the answer is composed
-    # in code from schema.py so nothing unbuildable is ever taught. A question
-    # is never a closing.
+
+    if route["track"] == "app_setup":
+        if on_event:
+            on_event({"stage": "extracting", "track": "app_setup"})
+        spec = apps_extract.extract(client, messages, model)
+        spec["capability_question"] = route.get("capability_question")
+        spec["no_intent"] = route.get("no_intent")
+        feature_result = feature_request_result(spec, apps_ws)
+        result = _empty_result(feature_result) if feature_result is not None else {
+            "status": "needs_info", "scope_pinned": False, "out_of_scope": [],
+            "assumptions": [], "unmappable": spec.get("unmappable") or [], "errors": [],
+            "missing": [], "hallucinated": [], "unsupported": [], "resolutions": [],
+            "entity_notes": [], "questions": [], "questions_structured": [],
+            "questions_pending": 0, "feature_request": None,
+        }
+        if spec.get("closing") and _contributed_app_setup(spec, last_user):
+            spec["closing"] = False
+    else:
+        if on_event:
+            on_event({"stage": "extracting", "track": "automation"})
+        user_msgs = [m["content"] for m in messages if m["role"] == "user"]
+        convo_text = "\n".join(user_msgs)
+        spec = automation_extract.extract(client, messages, model, ws=ws, on_event=on_event)
+        spec["capability_question"] = route.get("capability_question")
+        spec["no_intent"] = route.get("no_intent")
+        if on_event:
+            on_event({"stage": "validating"})
+        result = automation_validator.validate(spec, convo_text, ws=ws, user_messages=user_msgs,
+                                               apps_ws=apps_ws)
+        spec = automation_validator.scrub(spec, result)
+        spec = automation_validator.apply_resolutions(spec, result)
+        result["feature_request"] = None
+        if spec.get("closing") and _contributed(spec, last_user):
+            spec["closing"] = False
+
+    # capability questions: the model only classifies (router.py); the answer
+    # is composed in code from schema.py so nothing unbuildable is ever
+    # taught. A question is never a closing.
     if spec.get("capability_question"):
         spec["closing"] = False
     # gibberish/off-topic: read-only, like a capability question — a
@@ -333,11 +381,12 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
     return spec, result
 
 
-def respond_structured(client, messages, model=extract.MODEL, ws=None, apps_ws=None,
+def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
                        on_event=None):
     """One turn, machine-readable: everything a UI needs to render the state.
     Same pipeline as respond(); returns a dict instead of prose."""
-    spec, result = _turn(client, messages, model, ws, apps_ws=apps_ws, on_event=on_event)
+    spec, result = _turn(client, messages, model or automation_extract.MODEL, ws,
+                        apps_ws=apps_ws, on_event=on_event)
     complete = result["status"] == "complete"
     feature_result = result.get("feature_request")
     return {
@@ -353,7 +402,7 @@ def respond_structured(client, messages, model=extract.MODEL, ws=None, apps_ws=N
         "intent_summary": spec.get("intent_summary") or "",
         "spec": spec,
         "rule": to_final_json(spec) if complete and feature_result is None else None,
-        "draft": render_feature(spec, feature_result) if feature_result is not None
+        "draft": render_feature(feature_result) if feature_result is not None
                  else render_structure(spec),
         "assumptions": result.get("assumptions", []),
         "unmappable": result.get("unmappable", []),
@@ -378,24 +427,25 @@ def _render_test_run(test_run):
     return f"Test run: couldn't complete — {test_run.get('reason', 'unknown error')}."
 
 
-def respond(client, messages, model=extract.MODEL, ws=None, apps_ws=None):
+def respond(client, messages, model=None, ws=None, apps_ws=None):
     """One turn. messages = full chat history [{role, content}]. Returns reply text.
     With a workspace, extraction may use lookup tools and the validator re-verifies
     every resolution against the user's own words."""
-    spec, result = _turn(client, messages, model, ws, apps_ws=apps_ws)
+    spec, result = _turn(client, messages, model or automation_extract.MODEL, ws,
+                        apps_ws=apps_ws)
 
     feature_result = result.get("feature_request")
     if feature_result is not None:
         # Track A: a completely different shape from an automation turn —
         # no WHEN/IF/THEN, no closing logic below (all of which assume a
         # rule with a trigger) — but it DOES have its own one-question-at-a-
-        # time loop (features.resolve_setup), rendered the same "closest
+        # time loop (apps.setup.resolve_setup), rendered the same "closest
         # known state, then what's next" way as the automation path.
         if feature_result["status"] == "complete":
             feat = feature_result["feature"]
             return (f"{feat['name']} is set up — {feat['description']}\n\n"
-                    + render_feature(spec, feature_result))
-        parts = [render_feature(spec, feature_result)]
+                    + render_feature(feature_result))
+        parts = [render_feature(feature_result)]
         if feature_result["status"] == "invalid":
             parts.append("This isn't usable yet in this workspace: "
                          + "; ".join(feature_result.get("errors", [])) + ".")

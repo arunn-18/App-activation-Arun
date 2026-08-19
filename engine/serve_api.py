@@ -31,12 +31,12 @@ os.environ.setdefault("COPILOT_PILOT_SCOPE", "1")
 
 import connected_apps
 import copilot
-import extract
 import preview
-import schema
+import router
 import workspace as wsmod
+from automation import schema
 
-CLIENT = extract.make_client()
+CLIENT = router.make_client()
 WS = wsmod.load()
 APPS_WS = connected_apps.load()
 

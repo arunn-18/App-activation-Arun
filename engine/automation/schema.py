@@ -1,12 +1,25 @@
 import os
-"""v2 rule-spec schema: the legal vocabulary of Hiver automations.
+"""Automation-track rule-spec schema: the legal vocabulary of Hiver
+automations (trigger -> conditions -> actions), plus the one connector
+recipe (Track B — a first-class action type inside this SAME schema, per
+the product requirement that an app-based automation must be configurable
+from the Automations panel too, not only the Apps panel).
 
-Grounded in the 90-day prod dump (see ../eval/README.md): trigger names, condition
+Grounded in the 90-day prod dump (see ../../eval/README.md): trigger names, condition
 properties, operators, and action payloads are the real `automation_ai` DB vocabulary,
 so a spec that validates here is buildable in prod.
 
 Semantics: condition_groups are AND'd; conditions within a group are OR'd; a
 condition's values array is any-of. (Assumed from data — pending eng confirmation.)
+
+Track A ("configure an existing App feature" — no trigger, not an
+automation) is NOT here. It has its own peer schema at apps/schema.py,
+its own extraction pass (apps/extract.py), and its own resolver
+(apps/setup.py) — see that package's docstrings for why: this file's
+vocabulary (triggers/conditions/actions) has no meaning for a Track A ask,
+and forcing the two into one schema is exactly the "still works with the
+automation schema" mistake this split fixes (see router.py for how a turn
+is routed to one track or the other BEFORE either schema is even loaded).
 """
 
 TRIGGERS = {
@@ -161,17 +174,20 @@ def compat_error(trigger, prop):
 # lands more recipes):
 #   - every step is api_call or assign; a real recipe #2 might need a
 #     terminal action that isn't `assign` (tag, note, status) or a step that
-#     branches on the response — executor.py's chain runner only knows these
-#     two kinds today.
+#     branches on the response — automation/executor.py's chain runner only
+#     knows these two kinds today.
 #   - the CSM-vs-AE role filtering for this recipe happens INSIDE the mock
 #     service's op (get_account_team_csm queries "the CSM", not "the team"),
 #     not as generic chain logic — that keeps the executor simple, but it
 #     means recipe #2 needing real branching logic has no home yet; decide
 #     then whether that belongs in the chain shape or stays a mock-service
 #     detail.
-#   - prerequisites are plain boolean workspace-state flags. A recipe needing
-#     a configured VALUE (e.g. "which Salesforce field maps to X") doesn't fit
-#     this shape — don't stretch it; extend the prerequisite entry then.
+#   - prerequisites are plain boolean workspace-state flags (shared with Track
+#     A via connected_apps.py's PREREQUISITE_LABELS/PREREQUISITE_ACTIONS — a
+#     "does this app need connecting" check is the same question for either
+#     track). A recipe needing a configured VALUE (e.g. "which Salesforce
+#     field maps to X") doesn't fit this shape — don't stretch it; extend the
+#     prerequisite entry then.
 RECIPES = {
     "salesforce_account_csm_autoassign": {
         "app": "salesforce",
@@ -190,22 +206,6 @@ RECIPES = {
         ],
         "prerequisites": ["salesforce_connected", "account_team_enabled"],
     },
-}
-
-# prerequisite flag -> what it means, for error/status messages
-PREREQUISITE_LABELS = {
-    "salesforce_connected": "the Salesforce app must be connected",
-    "account_team_enabled": "Salesforce Account Team must be enabled with a CSM role",
-}
-
-# prerequisite flag -> the one-click fix, when the flag can be satisfied by a
-# real (mocked) connect action rather than just a static error. `phrase` is
-# what a click composes into chat (connected_apps.connect() recognizes it via
-# copilot's Track A wiring); not every prerequisite has one yet (e.g.
-# account_team_enabled has no mock "enable Account Team" action -- it's
-# assumed already configured on the Salesforce side).
-PREREQUISITE_ACTIONS = {
-    "salesforce_connected": {"label": "Connect Salesforce", "phrase": "connect salesforce"},
 }
 
 # action type -> param spec.
@@ -307,76 +307,3 @@ UNSUPPORTED = {
 # bare plurals ("incoming emails") deliberately do NOT count
 ALL_MAIL_QUANTIFIERS = ["all ", "every ", "everything", "each ", "any email", "any conversation",
                         "any incoming", "todos", "alle "]
-
-
-# ---------------------------------------------------------------------------
-# Track A: "configure an existing App feature" — NOT an automation. No
-# trigger, no conditions, no action chain; it's a one-time on/off (or
-# one-time confirm) for a capability the app already has. Apps-panel-only —
-# the Automations panel has no equivalent to route this onto, so it is
-# deliberately NOT wired into ACTIONS/RECIPES above; see engine/features.py
-# for why it gets its own small module instead of being forced through the
-# rule-spec engine.
-#
-# GENERIC: the dict shape (id -> app/name/description/prerequisites) and the
-# prerequisite-flag check reuse the same mechanism as RECIPES' prerequisites,
-# on purpose — both ask the same question ("is this app connected and
-# configured enough to use?"). Adding a Track A feature is a data entry here.
-#
-# SHAPED BY ONE EXAMPLE (updated 2026-08-18 against the real product spec —
-# "Apps Activation Steps: Usecase-wise steps"): a Track A feature is now a
-# real guided flow, not a single yes/no check:
-#   1. Authentication      -- prerequisites, same mechanism as RECIPES'
-#   2. Record-level visibility config -- pick which objects to show
-#      (object_choices below), from the platform-wide out-of-the-box list
-#      (ALL_SUPPORTED_OBJECTS)
-#   3. Field config - Read -- for each chosen object, pick fields from a
-#      live "describe" call (FIELD_CATALOG / salesforce_mock.describe_fields)
-#      -- standard AND custom, proving the field list comes from an API call
-#      rather than a hardcoded guess
-#   4. Confirm & enable
-# See engine/features.py's resolve_setup() for the question-planning that
-# walks these in order, one blocking question at a time (mirrors
-# validator.py's discipline).
-#
-# STILL SHAPED BY ONE EXAMPLE: only Account/Contact have a FIELD_CATALOG
-# entry (this feature's own object_choices), and Field config - Write /
-# Prefill fields / Quick Access (the product spec's other listed steps)
-# are explicitly NOT built — they belong to "Managing CRM Records from
-# Hiver", a use case out of scope for this pass. Don't stretch this feature
-# to cover them.
-FEATURES = {
-    "salesforce_account_contact_details": {
-        "app": "salesforce",
-        "name": "View account & contact details",
-        "description": ("Show the sender's Salesforce Account and Contact details "
-                        "(company, owner, CSM, open cases) alongside the conversation."),
-        "prerequisites": ["salesforce_connected"],
-        "object_choices": ["Account", "Contact"],
-    },
-}
-
-# The full out-of-the-box object list Salesforce's "Record-level visibility
-# config" step can offer, per the product spec — kept here for the NEXT
-# Track A feature (e.g. "Managing CRM Records from Hiver" would offer
-# Opportunity/Lead/Case too); only Account/Contact are wired to a
-# FIELD_CATALOG entry today, so only those are usable end to end.
-ALL_SUPPORTED_OBJECTS = ["Account", "Contact", "Opportunity", "Lead", "Case"]
-
-# Track A's "Field config - Read" step calls this catalog the way a real
-# integration would call Salesforce's object-describe API — standard AND
-# custom fields, so field selection is never a fixed hardcoded list. Only
-# Account/Contact are populated (the one feature that needs them); adding a
-# feature that uses Opportunity/Lead/Case needs their real field names
-# supplied the same way these were, not invented.
-FIELD_CATALOG = {
-    "Account": {
-        "standard": ["Account Name", "Account Website", "Account Owner",
-                     "Annual Revenue", "Number of Employees", "Phone"],
-        "custom": ["Renewal Date", "Health Score"],
-    },
-    "Contact": {
-        "standard": ["Contact Name", "Contact Email", "Contact Phone", "Contact Role"],
-        "custom": ["Preferred Language"],
-    },
-}

@@ -15,11 +15,31 @@ grows. SHAPED BY ONE EXAMPLE: only Salesforce is populated, and its two flags
 recipe + Track A feature need — not a general taxonomy of what an app
 prerequisite could be. A prerequisite that needs a configured VALUE, not just
 a yes/no, doesn't fit this shape yet.
+
+PREREQUISITE_LABELS/PREREQUISITE_ACTIONS live here (not in either track's
+schema.py) because "is this app connected/configured enough?" is the SAME
+question for both automation/schema.py's RECIPES and apps/schema.py's
+FEATURES — genuinely shared vocabulary, not owned by either track.
 """
 import json
 from pathlib import Path
 
 DEFAULT_PATH = Path(__file__).parent / "connected_apps.json"
+
+# prerequisite flag -> what it means, for error/status messages
+PREREQUISITE_LABELS = {
+    "salesforce_connected": "the Salesforce app must be connected",
+    "account_team_enabled": "Salesforce Account Team must be enabled with a CSM role",
+}
+
+# prerequisite flag -> the one-click fix, when the flag can be satisfied by a
+# real (mocked) connect() action rather than just a static error. `phrase` is
+# what a click composes into chat; not every prerequisite has one yet (e.g.
+# account_team_enabled has no mock "enable Account Team" action — it's
+# assumed already configured on the Salesforce side).
+PREREQUISITE_ACTIONS = {
+    "salesforce_connected": {"label": "Connect Salesforce", "phrase": "connect salesforce"},
+}
 
 
 def load(path=DEFAULT_PATH):
@@ -40,7 +60,7 @@ def prerequisites_met(apps_ws, app, prerequisite_keys):
 
 def connect(apps_ws, app):
     """Mock 'complete the connect/OAuth flow' action — the Authentication
-    step's one-click fix (schema.PREREQUISITE_ACTIONS). Flips `connected`
+    step's one-click fix (PREREQUISITE_ACTIONS above). Flips `connected`
     and every prerequisite flag ALREADY REGISTERED for this app to True, in
     place, so the connection persists for the rest of this server process —
     the same in-memory-only demo state as the rule log / workspace fixtures

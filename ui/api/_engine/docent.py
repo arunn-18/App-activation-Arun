@@ -12,7 +12,7 @@ variables, limits). Anything else gets an honest redirect.
 """
 import re
 
-import schema
+from automation import schema
 
 _OVERVIEW = (
     "Here's the surface I can build on: a rule fires on one trigger (new "

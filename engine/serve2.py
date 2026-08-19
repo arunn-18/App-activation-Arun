@@ -8,10 +8,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import connected_apps
 import copilot
-import extract
+import router
 import workspace as wsmod
 
-CLIENT = extract.make_client()
+CLIENT = router.make_client()
 WS = wsmod.load()  # demo fixture; comment out to run workspace-less like the eval
 # connected-apps fixture: same one serve_apps.py (the Apps-panel entry) uses,
 # so a connector rule built from EITHER panel gets the same prerequisite

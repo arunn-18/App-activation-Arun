@@ -17,8 +17,9 @@ connected?). None skips the check — see the connector prerequisites block.
 """
 import re
 import connected_apps
-import schema
 import workspace as wsmod
+
+from . import schema
 
 MAX_QUESTIONS = 3
 
@@ -573,7 +574,7 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
             unmet = connected_apps.prerequisites_met(apps_ws, recipe["app"],
                                                      recipe["prerequisites"])
             if unmet:
-                labels = [schema.PREREQUISITE_LABELS.get(p, p) for p in unmet]
+                labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
                 errors.append(f"action {ai + 1}: '{recipe['name']}' isn't buildable yet — "
                               + "; ".join(labels))
 

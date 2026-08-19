@@ -10,12 +10,13 @@ require (pick objects, pick fields from a live API call, confirm), not a
 single check. See features.resolve_setup()'s module docstring for the full
 step order.
 
-extract.extract() is monkeypatched in the multi-turn section to isolate
-copilot.py's ACCUMULATION and ROUTING logic (does feature_setup correctly
-flow into features.resolve_setup() turn over turn?) from the LLM's own
-reliability at filling those slots from free-form English, which is a
-separate, not-yet-verifiable-here concern (see test_connector.py's module
-docstring for the same caveat on Track B).
+router.classify() and apps.extract.extract() are monkeypatched in the
+multi-turn section to isolate copilot.py's ACCUMULATION logic (does the
+flat setup spec correctly flow into features.resolve_setup() turn over
+turn?) from the LLM's own reliability at choosing a track and filling
+those slots from free-form English, which is a separate,
+not-yet-verifiable-here concern (see test_connector.py's module docstring
+for the same caveat on Track B).
 
 Run: python3 test_track_a.py
 """
@@ -23,9 +24,10 @@ import sys
 
 import connected_apps
 import copilot
-import extract
-import features
-import schema
+import router
+from apps import extract
+from apps import schema
+from apps import setup as features
 
 FEATURE_ID = "salesforce_account_contact_details"
 
@@ -133,17 +135,22 @@ def run():
     check("unknown feature id is an error, not a silent no-op / KeyError",
           unknown["status"] == "invalid")
 
-    none_ctx = copilot.feature_request_result(
-        {"app_feature": FEATURE_ID, "feature_setup": _setup()}, None)
+    none_ctx = copilot.feature_request_result({"feature": FEATURE_ID, **_setup()}, None)
     check("no apps_ws context -> invalid, not a crash", none_ctx["status"] == "invalid")
 
     # ---- copilot._turn / respond_structured: routing + turn-over-turn --------
-    # accumulation, exercised through the real pipeline (only extract.extract
-    # is stubbed) -- the actual regression the earlier bug was about.
+    # accumulation, exercised through the real pipeline (router.classify and
+    # apps.extract.extract are both stubbed) -- the actual regression the
+    # earlier bug was about.
+    original_classify = router.classify
     original_extract = extract.extract
     convo_ws = _disconnected_ws()
 
-    def fake_extract(client, messages, model=None, ws=None, on_event=None):
+    def fake_classify(client, messages, model=None):
+        return {"intent_summary": "test", "track": "app_setup",
+                "capability_question": None, "no_intent": None}
+
+    def fake_extract(client, messages, model=None):
         text = " ".join(m["content"] for m in messages if m["role"] == "user").lower()
         setup = _setup()
         if "connect" in text:
@@ -156,12 +163,10 @@ def run():
             setup["contact_fields"] = ["Contact Email"]
         if "enable it" in text:
             setup["confirm"] = True
-        return {"intent_summary": "test", "trigger": None, "scope_confirmed": False,
-                "condition_groups": [], "actions": [], "ai_extract": None,
-                "unsupported_requests": [], "closing": False,
-                "capability_question": None, "no_intent": None, "unmappable": [],
-                "app_feature": FEATURE_ID, "feature_setup": setup}
+        return {"intent_summary": "test", "feature": FEATURE_ID, "closing": False,
+                "unmappable": [], **setup}
 
+    router.classify = fake_classify
     extract.extract = fake_extract
     try:
         msgs = [{"role": "user", "content": "set up salesforce account cards"}]
@@ -209,6 +214,7 @@ def run():
               schema.FEATURES[FEATURE_ID]["name"] in copilot.respond(
                   None, msgs, apps_ws=convo_ws))
     finally:
+        router.classify = original_classify
         extract.extract = original_extract
 
     print(f"track A unit cases: {units - fails}/{units} passed")

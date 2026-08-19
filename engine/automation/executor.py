@@ -30,7 +30,7 @@ this was built to make cheap, not something requiring a rewrite here.
 import re
 
 import salesforce_mock
-import schema
+from . import schema
 
 MOCK_SERVICES = {"salesforce": salesforce_mock}
 

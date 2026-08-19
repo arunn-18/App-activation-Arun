@@ -19,12 +19,12 @@ import sys
 
 import connected_apps
 import copilot
-import extract
+import router
 import workspace as wsmod
 
 if __name__ == "__main__":
     raw = sys.stdin.read().strip()
-    client = extract.make_client()
+    client = router.make_client()
     ws = wsmod.load() if "--workspace" in sys.argv else None
     apps_ws = connected_apps.load() if "--apps-workspace" in sys.argv else None
     if raw.startswith("{"):

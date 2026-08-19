@@ -398,6 +398,59 @@ Salesforce describe calls. Full sweep: core 56/56, validator units 58/58,
 connector 27/27 (3 Track A checks moved out to test_track_a.py), track A
 26/26 — no regressions.
 
+## Structural split: automation/ and apps/ as peer packages (v2.10, 2026-08-19)
+
+Live testing after the v2.9 rebuild surfaced the real complaint: even with a
+proper multi-turn Track A flow, the wire schema was still, in the user's own
+words, "the automation schema, with two extra optional fields hanging off the
+side." `extract.py` was ONE shared extraction call whose strict JSON schema
+carried `trigger`/`condition_groups`/`actions` (automation) AND
+`app_feature`/`feature_setup` (Track A) as siblings in the same object —
+structurally still one schema pretending to be two, regardless of how much
+downstream branching logic (`copilot.py`'s `_turn()`) tried to keep them
+apart. That's a real design smell, not a cosmetic one: every future Track A
+field would keep landing as an afterthought bolted onto the automation
+object, and the two tracks could never evolve independent vocabularies
+without fighting over one shared `strict` schema.
+
+Fix: automation and Track A are now genuine peer Python packages,
+`engine/automation/` and `engine/apps/`, each with its own `schema.py`,
+`extract.py` (own strict JSON schema, own SYSTEM prompt, own vocabulary —
+neither imports the other's), and their own resolver (`automation/validator.py`
+/ `apps/setup.py`) and, for automation, `executor.py`. Shared infrastructure
+both tracks genuinely need — `connected_apps.py` (prerequisite state used by
+both a connector recipe's prerequisites and a Track A feature's) and
+`salesforce_mock.py` (the mock service both a connector chain step and a
+Track A describe-fields call use) — stays at the top level as real shared
+modules, not duplicated into either package.
+
+**`router.py` (new):** the FIRST model call of every turn, classification
+only. It decides `track` ("automation" | "app_setup") from the WHOLE
+conversation history, re-derived fresh each turn and sticky once established
+— BEFORE either track's extraction schema is even loaded. `copilot.py` calls
+`automation.extract.extract()` or `apps.extract.extract()` depending on what
+the router said; neither extractor has ever heard of the other's fields.
+`capability_question`/`no_intent` are read-only classifications that ride
+alongside `track` (mirroring the old single-call design) so a capability
+question or a gibberish turn never erases whatever progress the real track
+already has.
+
+**Wire contract preserved on purpose:** `copilot.respond_structured()`'s
+output shape — `status`/`track`/`feature_request`/`spec`/`draft`/
+`questions_structured`/etc. — is unchanged, so the UI (`ui/lib/api.ts`,
+`RuleCard`, `FeatureCard`) needed zero edits. The fix was entirely about how
+the ENGINE reaches that shape (two independent schemas instead of one
+shared one with a branch), not about what it hands the UI.
+
+**Testing:** all three pure-code suites were updated for the new import
+paths and package-scoped monkeypatches (`test_track_a.py` now stubs
+`router.classify` AND `apps.extract.extract` separately, matching the real
+two-call pipeline) and re-run clean: validator 56/56 core + 58/58 units,
+connector 27/27, track A 26/26 — no regressions. `ui/scripts/sync-engine.sh`
+now vendors `automation/` and `apps/` as real subpackages (not flattened)
+and its self-import check verifies every module inside each, the same
+denylist-not-allowlist guarantee it already had for the top level.
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session

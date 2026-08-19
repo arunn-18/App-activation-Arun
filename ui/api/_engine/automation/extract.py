@@ -1,14 +1,21 @@
-"""LLM extraction: conversation -> partial rule spec (structured output).
+"""LLM extraction: conversation -> partial AUTOMATION rule spec (structured
+output). Runs ONLY when router.classify() has already decided this turn's
+track is "automation" — this module has no concept of Track A at all (no
+app_feature, no feature_setup); that vocabulary lives entirely in
+apps/extract.py, a genuine peer of this file, not a shared schema this one
+also has to know about.
 
 The model's ONLY job is faithful slot-filling: map the user's words onto the legal
 vocabulary, leave unknowns null/empty, list unsupported asks. It never decides
-what to ask or whether the rule is complete — that's validator.py's job.
+what to ask or whether the rule is complete — that's automation/validator.py's job.
+capability_question/no_intent classification already happened in router.py before
+this was even called.
 """
 import json
-from pathlib import Path
 
-import schema
 import workspace as wsmod
+
+from . import schema
 
 MODEL = "gpt-4o"
 
@@ -33,24 +40,14 @@ def _vocab_block():
                  "it sounds):")
     for rid, r in schema.RECIPES.items():
         lines.append(f"  {rid} ({r['app']}) — {r['description']}")
-    lines.append("APP FEATURES (Track A — legal values for `app_feature`; NOT automations, "
-                 "see rule 20 below; this is the COMPLETE list):")
-    for fid, f in schema.FEATURES.items():
-        lines.append(f"  {fid} ({f['app']}) — {f['description']}")
-        if f.get("object_choices"):
-            lines.append(f"    setup: pick records from {f['object_choices']} "
-                         "(feature_setup.objects), then pick fields per record "
-                         "(feature_setup.<object>_fields) — see rule 21.")
-    lines.append("TRACK A FIELD CATALOG (legal values for feature_setup.account_fields / "
-                 "contact_fields — standard AND custom; nothing outside these lists is real):")
-    for obj, cat in schema.FIELD_CATALOG.items():
-        lines.append(f"  {obj}: standard={cat['standard']}, custom={cat['custom']}")
     lines.append("UNSUPPORTED (recognize, put in unsupported_requests, never emit as actions): "
                  + "; ".join(f"{k} ({v})" for k, v in schema.UNSUPPORTED.items()))
     return "\n".join(lines)
 
 
-SYSTEM = f"""You extract Hiver automation rule specs from a conversation. Output ONLY the JSON spec.
+SYSTEM = f"""You extract Hiver AUTOMATION rule specs from a conversation (router.py has
+already decided this turn is about an automation, not an app-feature setup). Output
+ONLY the JSON spec.
 
 {_vocab_block()}
 
@@ -159,24 +156,6 @@ EXTRACTION RULES:
    close everything from notifications@streamliner.example" -> "You want the
    Streamliner notification emails closed automatically so nobody has to deal
    with them." NEVER start with an imperative verb copied from the request.
-15. capability_question: ONLY when the LATEST user message is a QUESTION about
-   what the automation builder can do ("what other assignment options are
-   there?", "can rules send replies?", "what can I filter on?"). Set it to a
-   SHORT topic phrase echoing their words ("assignment options"); otherwise
-   null. A message that ANSWERS a question, names entities, picks an option or
-   states a value is NOT a capability question even when it mentions a
-   capability ("dara is Dana, and john means John Baker" -> null; "share it out
-   by round robin" -> null). The question itself adds
-   no rule content — leave every spec field exactly as the prior messages
-   justify. A message that both asks and adds content sets the field AND the
-   content. capability_question is never a closing.
-18. no_intent: a SHORT reason when the LATEST user message contains no
-   automation content at all — a keysmash or gibberish ("sdfdsfdsfsd"), small
-   talk, or a remark unrelated to building a rule. Leave EVERY spec field
-   exactly as the earlier messages justify: a meaningless message must not add,
-   change or invent anything, and must NEVER produce an empty condition
-   scaffold. null otherwise. Never set it for a message that answers a
-   question, names a value, wraps up, or asks what the builder can do.
 16. unmappable: when a requirement CANNOT be expressed in the vocabulary above —
    no condition property matches it, no action does — record it here as
    {{request: <the user's own words>, why: <what is missing>}} and leave the rule
@@ -205,58 +184,10 @@ EXTRACTION RULES:
    only a match or a clean escalation). test_contact_email is filled ONLY
    from an email address the user actually wrote, exactly like any other
    provenance-guarded value (rule 1).
-20. Track A — app_feature: some asks are NOT automations at all — no trigger,
-   no per-conversation chain, just "turn on / show me / let me use an
-   existing app capability". Set `app_feature` to the matching APP FEATURES
-   id and leave trigger/condition_groups/actions at their empty defaults
-   (null/[]) — do NOT invent a trigger or actions just because the schema
-   has slots for them; this request has none.
-   DISAMBIGUATION (this is the part that's easy to get wrong — a real test
-   showed "set up Salesforce account cards for my shared mailbox" being
-   misclassified as an unsupported connector ask instead of Track A):
-     - VIEWING/SHOWING/DISPLAYING existing information alongside a
-       conversation — "account cards", "contact details", "see the
-       customer's info", "show me their Salesforce record" — is Track A.
-       Nothing fires per conversation; there's no "when X, do Y".
-     - CREATING, PUSHING, SYNCING, or ASSIGNING data — "log this email in
-       Salesforce", "create a case", "sync conversations", "assign to the
-       CSM automatically" — is Track B (rule 19's connector) or plain
-       unsupported, never app_feature, even if it mentions the same app.
-     - An app-feature ask that doesn't match any APP FEATURES entry (wrong
-       app, or a real Track A idea not built yet) is NOT app_feature either
-       — leave it null and record it in unmappable (rule 16) or
-       unsupported_requests, the same honest-gap handling as anything else
-       outside the vocabulary.
-   Never set app_feature AND build rule content in the same turn — they are
-   mutually exclusive tracks.
-21. Track A setup (feature_setup): once app_feature is set (this turn OR any
-   earlier turn in the conversation — RE-DERIVE it every turn from the WHOLE
-   history, exactly like condition_groups for automations), fill
-   `feature_setup` from what the user has said so far:
-     - connect_requested: true the moment the user agrees to connect the app
-       (answers "yes"/"connect" to a connect prompt, or says "connect
-       salesforce" unprompted). Keep it true for the rest of the
-       conversation once said.
-     - objects: every record type the user named THAT IS in this feature's
-       object_choices (e.g. "Account", "Contact") — legal values ONLY from
-       the APP FEATURES setup line above, never invented, never a record
-       type from a different feature.
-     - account_fields / contact_fields: every field name the user picked for
-       that object, legal values ONLY from the TRACK A FIELD CATALOG above
-       for that object (standard or custom — both are real, don't treat
-       custom fields as less legitimate). A later message REMOVING a field
-       ("actually, drop phone number") changes the CURRENT list — re-derive
-       the accumulated set from the whole conversation, don't just append.
-     - confirm: true only when the user gives an explicit go-ahead to enable
-       (e.g. "yes, enable it", "looks good, turn it on") AFTER setup
-       questions, not a generic "yes" answering an earlier unrelated
-       question.
-   Leave any slot null/[] the user hasn't addressed — the code (not you)
-   decides what to ask next and in what order.
 """
 
 RESPONSE_SCHEMA = {
-    "name": "rule_spec",
+    "name": "automation_spec",
     "strict": True,
     "schema": {
         "type": "object", "additionalProperties": False,
@@ -329,28 +260,6 @@ RESPONSE_SCHEMA = {
             },
             "unsupported_requests": {"type": "array", "items": {"type": "string"}},
             "closing": {"type": "boolean"},
-            "capability_question": {"type": ["string", "null"]},
-            "no_intent": {"type": ["string", "null"]},
-            "app_feature": {"type": ["string", "null"],
-                           "enum": list(schema.FEATURES) + [None]},
-            # Track A setup slots (rule 21). Fixed shape, not a dynamic map:
-            # account_fields/contact_fields are named for the two objects
-            # schema.FIELD_CATALOG currently covers — a future object needs
-            # its own <object>_fields property added here, the same way
-            # test_contact_email is this connector recipe's one slot (see
-            # schema.py's ACTIONS["connector"] comment for the same point).
-            "feature_setup": {
-                "type": ["object", "null"], "additionalProperties": False,
-                "properties": {
-                    "connect_requested": {"type": ["boolean", "null"]},
-                    "objects": {"type": ["array", "null"], "items": {"type": "string"}},
-                    "account_fields": {"type": ["array", "null"], "items": {"type": "string"}},
-                    "contact_fields": {"type": ["array", "null"], "items": {"type": "string"}},
-                    "confirm": {"type": ["boolean", "null"]},
-                },
-                "required": ["connect_requested", "objects", "account_fields",
-                             "contact_fields", "confirm"],
-            },
             "unmappable": {
                 "type": "array",
                 "items": {"type": "object", "additionalProperties": False,
@@ -361,33 +270,9 @@ RESPONSE_SCHEMA = {
         },
         "required": ["intent_summary", "trigger", "scope_confirmed",
                      "condition_groups", "actions", "ai_extract",
-                     "unsupported_requests", "closing", "capability_question",
-                     "unmappable", "no_intent", "app_feature", "feature_setup"],
+                     "unsupported_requests", "closing", "unmappable"],
     },
 }
-
-
-def load_env():
-    env = {}
-    env_file = Path(__file__).parent.parent.parent / "automation-copilot" / ".env"
-    try:
-        for line in env_file.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.split("#")[0].strip()
-    except OSError:
-        pass  # not on the dev machine (e.g. deployed) — env var must be set
-    return env
-
-
-def make_client():
-    import os
-    from openai import OpenAI
-    key = os.environ.get("OPENAI_API_KEY") or load_env().get("OPENAI_API_KEY")
-    if not key:
-        raise RuntimeError("OPENAI_API_KEY is not set (env var or v1 .env file)")
-    return OpenAI(api_key=key)
 
 
 # Appended to SYSTEM only when a workspace is connected, so the eval path

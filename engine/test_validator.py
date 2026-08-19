@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-import validator
+from automation import validator
 import workspace as wsmod
 
 EVAL_SET = Path(__file__).parent.parent / "eval" / "real-world-eval-set.jsonl"

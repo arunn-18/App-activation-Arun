@@ -10,18 +10,18 @@ Usecase-wise steps"), enabling a feature is:
   4. Confirm & enable
 
 resolve_setup() walks these in order, one blocking question at a time —
-the same MAX-1-thing-at-a-time discipline validator.py uses for automations,
+the same MAX-1-thing-at-a-time discipline automation/validator.py uses,
 applied to a much smaller, enum-only vocabulary (object/field names are
 picked from schema.FEATURES[...]['object_choices'] / schema.FIELD_CATALOG,
 never free text), which is why this doesn't need validator.py's
 provenance/entity-resolution machinery — there's nothing to hallucinate
 when the only legal answers are items from a list the code itself offered.
 
-Kept as its own module rather than folded into validator.py: Track A has no
-trigger/conditions/actions to validate, and forcing it through that shape
-would mean modeling a non-automation as one just to reuse code that doesn't
-fit it (see schema.py's FEATURES comment for the same point from the data
-side).
+This is apps/'s peer of automation/validator.py — the resolver half of
+Track A's own track, not a helper bolted onto the automation engine. Track A
+has no trigger/conditions/actions to validate, and forcing it through that
+shape kept producing exactly the "still works with the automation schema"
+bug the automation/ vs apps/ package split fixes (see router.py).
 
 GENERIC: resolve_setup()'s step order and question-planning work for any
 FEATURES entry that declares object_choices whose objects all have a
@@ -33,7 +33,8 @@ other listed setup steps) are explicitly NOT built here — they belong to
 """
 import connected_apps
 import salesforce_mock
-import schema
+
+from . import schema
 
 MAX_QUESTIONS = 1  # Track A asks ONE thing per turn — a short, ordered wizard,
                    # not a bundle (unlike validator.py's up-to-3: this flow is
@@ -66,13 +67,13 @@ def _result(status, errors=None, missing=None, feature=None, progress=None):
 
 
 def resolve_setup(feature_id, feature_setup, apps_ws):
-    """feature_setup: the slots extract.py filled this turn from the WHOLE
-    conversation so far (rule 21) — connect_requested, objects,
-    <object>_fields per selected object, confirm. Returns a
-    validator.validate()-shaped dict (status/errors/questions/
-    questions_structured) plus `feature` (set only once enabled) and
-    `progress` (what's been resolved so far, for the UI to show a running
-    summary the same way RuleCard shows partial WHEN/IF/THEN)."""
+    """feature_setup: the slots apps/extract.py filled this turn from the
+    WHOLE conversation so far — connect_requested, objects, <object>_fields
+    per selected object, confirm. Returns an automation/validator.py-shaped
+    dict (status/errors/questions/questions_structured) plus `feature` (set
+    only once enabled) and `progress` (what's been resolved so far, for the
+    UI to show a running summary the same way RuleCard shows partial
+    WHEN/IF/THEN)."""
     f = schema.FEATURES.get(feature_id)
     if f is None:
         return _result("invalid", errors=[f"unknown feature '{feature_id}'"])
@@ -86,8 +87,8 @@ def resolve_setup(feature_id, feature_setup, apps_ws):
     unmet = connected_apps.prerequisites_met(apps_ws, app, f["prerequisites"])
     progress = {"connected": not unmet}
     if unmet:
-        labels = [schema.PREREQUISITE_LABELS.get(p, p) for p in unmet]
-        action = schema.PREREQUISITE_ACTIONS.get(unmet[0])
+        labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
+        action = connected_apps.PREREQUISITE_ACTIONS.get(unmet[0])
         if action is None:
             # no one-click fix exists for this gate (e.g. an org-side config
             # Hiver can't flip) — an honest blocker, not a fake CTA

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import copilot
-import extract
+import router
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "eval"))
 import grader  # noqa: E402
@@ -140,7 +140,7 @@ def run_episode(client, ground):
 
 def main():
     records = {r["id"]: r for r in map(json.loads, open(EVAL_SET))}
-    client = extract.make_client()
+    client = router.make_client()
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_dir = OUT_ROOT / f"sim-{ts}"
     out_dir.mkdir(parents=True)

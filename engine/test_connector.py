@@ -30,10 +30,10 @@ Run: python3 test_connector.py
 import sys
 
 import connected_apps
-import executor
 import salesforce_mock
-import schema
-import validator
+from automation import executor
+from automation import schema
+from automation import validator
 
 RECIPE_ID = "salesforce_account_csm_autoassign"
 
