@@ -88,8 +88,25 @@ def _render_action(a):
     if t == "connector":
         recipe = automation_schema.RECIPES.get(a.get("recipe"))
         name = recipe["name"] if recipe else need(a.get("recipe"))
-        return f"run connector recipe — {name}, test-run with {need(a.get('test_contact_email'))}"
+        line = f"run connector recipe — {name}, test-run with {need(a.get('test_contact_email'))}"
+        assign_target = _connector_assign_target(recipe) if recipe else None
+        if assign_target:
+            line += f" → then assign the conversation to {assign_target} (extracted from Salesforce)"
+        return line
     return t
+
+
+def _connector_assign_target(recipe):
+    """The recipe's own terminal `assign` chain step, read generically off
+    RECIPES — not hardcoded to this one recipe's variable name — so the
+    THEN line and the exported JSON both show what the connector actually
+    does end to end (look up data, then assign), not just that it ran.
+    None for a recipe whose chain doesn't end in assign (schema.py's own
+    SHAPED-BY-ONE-EXAMPLE note already flags that as unbuilt)."""
+    for step in recipe.get("chain", []):
+        if step.get("kind") == "assign":
+            return step.get("target")
+    return None
 
 
 def render_structure(spec):
@@ -162,8 +179,10 @@ def to_final_json(spec):
         elif t in ("add_to_sm", "remove_from_sm"):
             actions.append({"type": t, "inboxes": [a["inbox"]] if a.get("inbox") else []})
         elif t == "connector":
+            recipe = automation_schema.RECIPES.get(a.get("recipe"))
             actions.append({"type": "connector", "recipe": a.get("recipe"),
-                            "test_contact_email": a.get("test_contact_email")})
+                            "test_contact_email": a.get("test_contact_email"),
+                            "assigns_to": _connector_assign_target(recipe) if recipe else None})
     ai_vars = (spec.get("ai_extract") or {}).get("variables") or []
     var_by_name = {v["name"]: v for v in ai_vars if v.get("name")}
 
@@ -232,13 +251,13 @@ def _contributed(spec, last_text):
 
 def _contributed_app_setup(spec, last_text):
     """The apps/ (Track A) analogue of _contributed(): did the given message
-    name a record or field that's now in the accumulated setup? Booleans
-    (connect_requested/confirm) aren't checked here, same as _contributed()
-    never checks booleans like `pinned` — there's no literal value to match
+    name a record, field, or inbox that's now in the accumulated setup?
+    connect_requested isn't checked here, same as _contributed() never
+    checks booleans like `pinned` — there's no literal value to match
     against the message text."""
     norm = " ".join(str(last_text).split()).lower()
     vals = []
-    for k in ("objects", "account_fields", "contact_fields"):
+    for k in ("objects", "account_fields", "contact_fields", "inboxes"):
         vals += spec.get(k) or []
     return any(str(v).strip() and " ".join(str(v).split()).lower() in norm
                for v in vals)
@@ -259,14 +278,17 @@ def connector_test_run(spec):
     return None
 
 
-def feature_request_result(app_spec, apps_ws):
+def feature_request_result(app_spec, apps_ws, ws=None):
     """Track A: resolve an app_setup turn through apps.setup.resolve_setup()
     — a genuine peer of automation_validator.validate(), not a branch off
     of it. `app_spec` (from apps/extract.py) IS the feature_setup shape
     resolve_setup() expects (connect_requested/objects/account_fields/
-    contact_fields/confirm), plus `feature` naming which one. Returns None
-    when app_spec has no feature match at all (an app_setup-routed turn that
-    still couldn't match any FEATURES entry — see apps/extract.py rule 8)."""
+    contact_fields/inboxes), plus `feature` naming which one. `ws` is the
+    entity workspace fixture (for the shared-inbox enable step) — same
+    fixture the automation track already threads through for entity
+    resolution. Returns None when app_spec has no feature match at all (an
+    app_setup-routed turn that still couldn't match any FEATURES entry —
+    see apps/extract.py rule 8)."""
     fid = app_spec.get("feature")
     if not fid:
         return None
@@ -274,7 +296,7 @@ def feature_request_result(app_spec, apps_ws):
         return {"status": "invalid", "feature_id": fid, "progress": {},
                 "errors": ["no connected-app context available"],
                 "questions": [], "questions_structured": []}
-    result = apps_setup.resolve_setup(fid, app_spec, apps_ws)
+    result = apps_setup.resolve_setup(fid, app_spec, apps_ws, ws)
     result["feature_id"] = fid
     return result
 
@@ -313,6 +335,8 @@ def render_feature(feature_result):
         lines.append("RECORDS  " + ", ".join(progress["objects"]))
     for obj, fields in (progress.get("fields_by_object") or {}).items():
         lines.append(f"  {obj} FIELDS  " + ", ".join(fields))
+    if progress.get("inboxes"):
+        lines.append("ENABLED FOR  " + ", ".join(progress["inboxes"]))
     if feature_result["status"] == "complete":
         lines.append("STATUS  Enabled")
     elif feature_result["status"] == "invalid":
@@ -341,7 +365,7 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
         spec = apps_extract.extract(client, messages, model)
         spec["capability_question"] = route.get("capability_question")
         spec["no_intent"] = route.get("no_intent")
-        feature_result = feature_request_result(spec, apps_ws)
+        feature_result = feature_request_result(spec, apps_ws, ws)
         result = _empty_result(feature_result) if feature_result is not None else {
             "status": "needs_info", "scope_pinned": False, "out_of_scope": [],
             "assumptions": [], "unmappable": spec.get("unmappable") or [], "errors": [],

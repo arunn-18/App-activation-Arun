@@ -48,11 +48,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import connected_apps
 import copilot
 import router
+import workspace as wsmod
 from apps import setup as features
 from automation import schema
 
 CLIENT = router.make_client()
 APPS_WS = connected_apps.load()
+WS = wsmod.load()
 
 APP_PATH = re.compile(r"^/api/apps/([^/]+)$")
 FEATURE_ENABLE_PATH = re.compile(r"^/api/apps/([^/]+)/features/([^/]+)/enable$")
@@ -99,12 +101,13 @@ class Handler(BaseHTTPRequestHandler):
         m = FEATURE_ENABLE_PATH.match(self.path)
         if m:
             # Track A is a multi-turn setup (auth -> objects -> fields ->
-            # confirm), not a single-shot toggle — this REST shortcut just
-            # reports the first blocking question from a clean start; the
-            # real flow is the /chat endpoint below, which accumulates
-            # feature_setup across turns the same way copilot.py does.
+            # enable-for-inboxes), not a single-shot toggle — this REST
+            # shortcut just reports the first blocking question from a clean
+            # start; the real flow is the /chat endpoint below, which
+            # accumulates feature_setup across turns the same way copilot.py
+            # does.
             _, feature_id = m.groups()
-            return self._send(200, features.resolve_setup(feature_id, {}, APPS_WS))
+            return self._send(200, features.resolve_setup(feature_id, {}, APPS_WS, WS))
         m = CHAT_PATH.match(self.path)
         if m:
             app = m.group(1)
@@ -116,11 +119,11 @@ class Handler(BaseHTTPRequestHandler):
                         if mm.get("role") in ("user", "assistant") and mm.get("content")]
                 if not msgs or msgs[-1]["role"] != "user":
                     return self._send(400, {"error": "messages must end with a user turn"})
-                # no workspace fixture threaded through here: the Apps panel
-                # builds a connector recipe, which has no entity (tag/user/
-                # inbox) slots to resolve — only Track B's test_contact_email,
-                # which needs provenance, not workspace lookup.
-                state = copilot.respond_structured(CLIENT, msgs, apps_ws=APPS_WS)
+                # WS is threaded through for Track A's enable-for-inboxes step
+                # (apps.setup.resolve_setup) — Track B's connector recipe still
+                # has no entity (tag/user/inbox) slots of its own to resolve,
+                # only test_contact_email, which needs provenance, not lookup.
+                state = copilot.respond_structured(CLIENT, msgs, ws=WS, apps_ws=APPS_WS)
                 state["app"] = app  # scoping is a no-op today (see module docstring)
                 return self._send(200, state)
             except Exception as e:

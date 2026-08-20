@@ -113,10 +113,12 @@ export interface ConnectorTestRun {
 
 /** Track A result (engine/features.resolve_setup()): a multi-turn guided
  *  setup for an existing App feature — Authentication -> pick records ->
- *  pick fields per record (from a live "describe" call) -> confirm. NOT an
- *  automation — no trigger, no conditions, no chain. `status` mirrors
- *  TurnState.status ("needs_info" mid-setup); questions/questions_structured
- *  drive the SAME QuestionForm the automation flow uses. */
+ *  pick fields per record (from a live "describe" call) -> enable for the
+ *  shared inbox(es) it applies to (naming inbox(es) IS the enable action,
+ *  not a separate plain yes/no CTA). NOT an automation — no trigger, no
+ *  conditions, no chain. `status` mirrors TurnState.status ("needs_info"
+ *  mid-setup); questions/questions_structured drive the SAME QuestionForm
+ *  the automation flow uses. */
 export interface FeatureRequest {
   status: "complete" | "needs_info" | "invalid";
   errors: string[];
@@ -128,6 +130,7 @@ export interface FeatureRequest {
   feature?: {
     id: string; app: string; name: string; description: string;
     objects: string[]; fields_by_object: Record<string, string[]>;
+    inboxes: string[];
   };
   /** what's been resolved so far, for a running summary — same spirit as
    *  RuleCard showing partial WHEN/IF/THEN while slots are still open. */
@@ -135,6 +138,7 @@ export interface FeatureRequest {
     connected?: boolean;
     objects?: string[];
     fields_by_object?: Record<string, string[]>;
+    inboxes?: string[];
   };
 }
 

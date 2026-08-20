@@ -7,7 +7,13 @@ Usecase-wise steps"), enabling a feature is:
   2. Record-level visibility   -- which objects should this feature show?
   3. Field config - Read       -- for each object, which fields (from a
                                   live "describe" call, not a fixed list)?
-  4. Confirm & enable
+  4. Enable                    -- which shared inbox(es) should this be
+                                  turned on for? (workspace.py's
+                                  shared_inboxes) Picking inbox(es) here IS
+                                  the enable action — not a separate plain
+                                  "Enable?" yes/no CTA, since a feature like
+                                  this is meaningfully scoped per inbox, not
+                                  global to the whole workspace.
 
 resolve_setup() walks these in order, one blocking question at a time —
 the same MAX-1-thing-at-a-time discipline automation/validator.py uses,
@@ -33,6 +39,7 @@ other listed setup steps) are explicitly NOT built here — they belong to
 """
 import connected_apps
 import salesforce_mock
+import workspace as wsmod
 
 from . import schema
 
@@ -66,14 +73,17 @@ def _result(status, errors=None, missing=None, feature=None, progress=None):
     }
 
 
-def resolve_setup(feature_id, feature_setup, apps_ws):
+def resolve_setup(feature_id, feature_setup, apps_ws, ws=None):
     """feature_setup: the slots apps/extract.py filled this turn from the
     WHOLE conversation so far — connect_requested, objects, <object>_fields
-    per selected object, confirm. Returns an automation/validator.py-shaped
+    per selected object, inboxes. Returns an automation/validator.py-shaped
     dict (status/errors/questions/questions_structured) plus `feature` (set
     only once enabled) and `progress` (what's been resolved so far, for the
     UI to show a running summary the same way RuleCard shows partial
-    WHEN/IF/THEN)."""
+    WHEN/IF/THEN). `ws`: the entity workspace fixture (for shared_inboxes) —
+    defaults to the demo fixture like connected_apps.py's own load() does,
+    so a caller that forgets to pass it still gets the real inbox list
+    rather than an empty one."""
     f = schema.FEATURES.get(feature_id)
     if f is None:
         return _result("invalid", errors=[f"unknown feature '{feature_id}'"])
@@ -140,15 +150,28 @@ def resolve_setup(feature_id, feature_setup, apps_ws):
         fields_by_object[obj] = chosen
     progress["fields_by_object"] = fields_by_object
 
-    # ---- step 4: confirm ------------------------------------------------------
-    if not feature_setup.get("confirm"):
+    # ---- step 4: enable — which shared inbox(es) this should apply to -------
+    # naming inbox(es) here IS the enable action; there is no separate plain
+    # yes/no CTA, since this feature is meaningfully scoped per inbox, not a
+    # single global on/off switch.
+    ws = ws or wsmod.load()
+    inbox_choices = ws.get("shared_inboxes", [])
+    requested_inboxes = feature_setup.get("inboxes") or []
+    inbox_names = {i["name"] for i in inbox_choices}
+    bad_inboxes = [x for x in requested_inboxes if x not in inbox_names]
+    inboxes = [x for x in requested_inboxes if x in inbox_names]
+    progress["inboxes"] = inboxes
+    if not inboxes:
+        errors = [f"'{b}' isn't a shared inbox in this workspace" for b in bad_inboxes]
         summary = "; ".join(f"{o} ({', '.join(fs)})" for o, fs in fields_by_object.items())
-        q = _question("feature_setup.confirm", f"Enable {f['name']} — {summary}?",
-                      [{"label": "Yes, enable it", "value": "yes, enable it"},
-                       {"label": "Not yet", "value": "not yet"}])
-        return _result("needs_info", missing=[q], progress=progress)
+        q = _question("feature_setup.inboxes",
+                      f"{f['name']} is ready — {summary}. Which shared inbox(es) "
+                      "should it be enabled for?",
+                      [{"label": i["name"], "value": i["name"]} for i in inbox_choices],
+                      multiple=True)
+        return _result("needs_info", errors=errors, missing=[q], progress=progress)
 
     return _result("complete", progress=progress, feature={
         "id": feature_id, "app": app, "name": f["name"], "description": f["description"],
-        "objects": objects, "fields_by_object": fields_by_object,
+        "objects": objects, "fields_by_object": fields_by_object, "inboxes": inboxes,
     })

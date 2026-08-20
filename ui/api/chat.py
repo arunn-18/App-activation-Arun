@@ -18,7 +18,7 @@ os.environ.setdefault("COPILOT_PILOT_SCOPE", "1")
 sys.path.insert(0, str(Path(__file__).parent / "_engine"))
 import connected_apps  # noqa: E402
 import copilot  # noqa: E402
-import extract  # noqa: E402
+import router  # noqa: E402
 import workspace as wsmod  # noqa: E402
 
 WS = wsmod.load()
@@ -32,7 +32,7 @@ _client = None
 def client():
     global _client
     if _client is None:
-        _client = extract.make_client()
+        _client = router.make_client()
     return _client
 
 

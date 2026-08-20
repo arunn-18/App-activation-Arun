@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "_engine"))
-import schema  # noqa: E402
+from automation import schema  # noqa: E402
 
 
 class handler(BaseHTTPRequestHandler):

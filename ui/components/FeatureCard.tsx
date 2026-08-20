@@ -21,11 +21,12 @@ const FEATURE_NAMES: Record<string, string> = {
 };
 
 /** Track A's card — a real multi-turn setup (engine/features.resolve_setup:
- *  Authentication -> pick records -> pick fields per record -> confirm),
- *  not a single yes/no check. Kept as its own component rather than a
- *  RuleCard variant: there is no trigger/conditions/actions to render, and
- *  progress accumulates as objects/objects+fields rather than WHEN/IF/THEN.
- *  The actual questions (connect CTA, record picker, field picker, confirm)
+ *  Authentication -> pick records -> pick fields per record -> enable for
+ *  the shared inbox(es) it applies to), not a single yes/no check. Kept as
+ *  its own component rather than a RuleCard variant: there is no
+ *  trigger/conditions/actions to render, and progress accumulates as
+ *  objects/objects+fields/inboxes rather than WHEN/IF/THEN. The actual
+ *  questions (connect CTA, record picker, field picker, inbox picker)
  *  render below this card via the SAME QuestionForm the automation flow
  *  uses — this card is the running summary, not the input. */
 export default function FeatureCard({
@@ -39,6 +40,7 @@ export default function FeatureCard({
     feat?.name ?? FEATURE_NAMES[featureRequest.feature_id ?? ""] ?? "App feature";
   const fieldsByObject = feat?.fields_by_object ?? progress.fields_by_object ?? {};
   const objects = feat?.objects ?? progress.objects ?? [];
+  const inboxes = feat?.inboxes ?? progress.inboxes ?? [];
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline bg-card">
@@ -62,7 +64,7 @@ export default function FeatureCard({
         )}
       </div>
 
-      {(progress.connected != null || objects.length > 0) && (
+      {(progress.connected != null || objects.length > 0 || inboxes.length > 0) && (
         <div className="space-y-1.5 border-t border-hairline px-4 py-3 text-[12.5px]">
           <p className="text-ink-soft">
             <span className="font-mono text-[11px] font-semibold text-muted-foreground">
@@ -86,6 +88,14 @@ export default function FeatureCard({
               {fields.join(", ")}
             </p>
           ))}
+          {inboxes.length > 0 && (
+            <p className="text-ink-soft">
+              <span className="font-mono text-[11px] font-semibold text-muted-foreground">
+                ENABLED FOR
+              </span>{" "}
+              {inboxes.join(", ")}
+            </p>
+          )}
         </div>
       )}
 

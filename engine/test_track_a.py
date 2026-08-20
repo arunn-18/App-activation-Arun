@@ -1,14 +1,21 @@
 """Track A tests: a real multi-turn setup flow (Authentication -> pick
-records -> pick fields per record, from a mocked "describe" call -> confirm
--> enable), per the 2026-08-18 product spec ("Apps Activation Steps:
-Usecase-wise steps"). Pure code, no LLM call, except where noted.
+records -> pick fields per record, from a mocked "describe" call -> enable
+for the shared inbox(es) it applies to), per the 2026-08-18 product spec
+("Apps Activation Steps: Usecase-wise steps"). Pure code, no LLM call,
+except where noted.
 
 This file replaced an earlier, much smaller version that only checked a
 single yes/no prerequisite gate — a real live run showed that shape was
 wrong: Track A needs the SAME guided-setup mechanics real product use cases
-require (pick objects, pick fields from a live API call, confirm), not a
-single check. See features.resolve_setup()'s module docstring for the full
-step order.
+require (pick objects, pick fields from a live API call, pick which
+inbox(es) to enable for). See features.resolve_setup()'s module docstring
+for the full step order.
+
+The enable step asks WHICH shared inbox(es) this should apply to instead of
+a plain yes/no CTA — naming inbox(es) is itself the enable action. It reads
+the same demo workspace fixture (workspace.py's shared_inboxes) the
+automation track already uses for entity resolution, defaulting to it when
+a caller doesn't pass one (see resolve_setup()'s own docstring).
 
 router.classify() and apps.extract.extract() are monkeypatched in the
 multi-turn section to isolate copilot.py's ACCUMULATION logic (does the
@@ -25,6 +32,7 @@ import sys
 import connected_apps
 import copilot
 import router
+import workspace as wsmod
 from apps import extract
 from apps import schema
 from apps import setup as features
@@ -47,7 +55,7 @@ def _connected_ws():
 
 def _setup(**kwargs):
     base = {"connect_requested": None, "objects": None,
-            "account_fields": None, "contact_fields": None, "confirm": None}
+            "account_fields": None, "contact_fields": None, "inboxes": None}
     base.update(kwargs)
     return base
 
@@ -111,24 +119,39 @@ def run():
           r6["status"] == "needs_info"
           and r6["questions_structured"][0]["slot"] == "feature_setup.contact_fields")
 
-    # ---- step 4: confirm ------------------------------------------------------
+    # ---- step 4: enable -- which shared inbox(es), not a plain yes/no CTA -----
+    demo_ws = wsmod.load()
+    real_inboxes = {i["name"] for i in demo_ws["shared_inboxes"]}
+
     r7 = features.resolve_setup(
         FEATURE_ID,
         _setup(objects=["Account"], account_fields=["Account Name", "Account Owner"]),
         connected)
-    check("all fields chosen, not confirmed yet -> asks to confirm",
+    check("all fields chosen, no inboxes yet -> asks which inbox(es) to enable for",
           r7["status"] == "needs_info"
-          and r7["questions_structured"][0]["slot"] == "feature_setup.confirm")
+          and r7["questions_structured"][0]["slot"] == "feature_setup.inboxes")
+    check("inbox options are the real workspace shared inboxes, not invented",
+          {o["value"] for o in r7["questions_structured"][0]["options"]} == real_inboxes)
+
+    r7b = features.resolve_setup(
+        FEATURE_ID,
+        _setup(objects=["Account"], account_fields=["Account Name", "Account Owner"],
+               inboxes=["Not A Real Inbox"]),
+        connected)
+    check("an inbox not in the workspace is rejected, not silently accepted",
+          r7b["status"] == "needs_info" and r7b["errors"])
 
     r8 = features.resolve_setup(
         FEATURE_ID,
         _setup(objects=["Account"], account_fields=["Account Name", "Account Owner"],
-               confirm=True),
+               inboxes=["Support", "Billing"]),
         connected)
-    check("confirmed -> complete", r8["status"] == "complete")
-    check("enabled feature carries the actual chosen objects/fields",
+    check("inbox(es) named -> complete (naming them IS the enable action)",
+          r8["status"] == "complete")
+    check("enabled feature carries the actual chosen objects/fields/inboxes",
           r8["feature"]["objects"] == ["Account"]
-          and r8["feature"]["fields_by_object"]["Account"] == ["Account Name", "Account Owner"])
+          and r8["feature"]["fields_by_object"]["Account"] == ["Account Name", "Account Owner"]
+          and r8["feature"]["inboxes"] == ["Support", "Billing"])
 
     # ---- edge cases -----------------------------------------------------------
     unknown = features.resolve_setup("not_a_real_feature", _setup(), connected)
@@ -161,8 +184,8 @@ def run():
             setup["account_fields"] = ["Account Name", "Account Owner"]
         if "contact email" in text:
             setup["contact_fields"] = ["Contact Email"]
-        if "enable it" in text:
-            setup["confirm"] = True
+        if "support inbox" in text:
+            setup["inboxes"] = ["Support"]
         return {"intent_summary": "test", "feature": FEATURE_ID, "closing": False,
                 "unmappable": [], **setup}
 
@@ -200,19 +223,21 @@ def run():
         msgs.append({"role": "assistant", "content": s4["draft"]})
         msgs.append({"role": "user", "content": "contact email"})
         s5 = copilot.respond_structured(None, msgs, apps_ws=convo_ws)
-        check("turn 5: asks to confirm",
+        check("turn 5: asks which inbox(es) to enable for",
               s5["feature_request"]["questions_structured"][0]["slot"]
-              == "feature_setup.confirm")
+              == "feature_setup.inboxes")
 
         msgs.append({"role": "assistant", "content": s5["draft"]})
-        msgs.append({"role": "user", "content": "yes, enable it"})
+        msgs.append({"role": "user", "content": "enable it for the support inbox"})
         s6 = copilot.respond_structured(None, msgs, apps_ws=convo_ws)
         check("turn 6: complete", s6["status"] == "complete")
         check("turn 6: no fake rule JSON alongside the feature",
               s6["rule"] is None and s6["test_run"] is None)
+        prose = copilot.respond(None, msgs, apps_ws=convo_ws)
         check("turn 6: prose confirms by name, never asks an automation question",
-              schema.FEATURES[FEATURE_ID]["name"] in copilot.respond(
-                  None, msgs, apps_ws=convo_ws))
+              schema.FEATURES[FEATURE_ID]["name"] in prose)
+        check("turn 6: prose names the inbox it's enabled for, not a bare 'enabled'",
+              "Support" in prose)
     finally:
         router.classify = original_classify
         extract.extract = original_extract

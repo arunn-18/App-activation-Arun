@@ -59,9 +59,13 @@ EXTRACTION RULES:
    later message REMOVING a field ("actually, drop phone number") changes the
    CURRENT list — re-derive the accumulated set from the whole conversation, don't
    just append.
-5. confirm: true only when the user gives an explicit go-ahead to enable (e.g. "yes,
-   enable it", "looks good, turn it on") AFTER setup questions, not a generic "yes"
-   answering an earlier unrelated question.
+5. inboxes: every shared inbox the user names when asked which inbox(es) this
+   feature should be enabled for — capture their own words for the name(s)
+   verbatim (e.g. "Support", "the billing inbox"); the code matches them against
+   the real workspace list, so you don't need to know it. Naming an inbox here
+   IS the enable action — there is no separate yes/no confirmation. A later
+   message REMOVING one ("actually not Billing") changes the CURRENT list —
+   re-derive the accumulated set from the whole conversation, don't just append.
    Leave any slot null/[] the user hasn't addressed — the code (not you) decides
    what to ask next and in what order.
 6. closing = true ONLY when the LATEST user message adds no setup content and just
@@ -95,7 +99,7 @@ RESPONSE_SCHEMA = {
             # for the same point from the other track).
             "account_fields": {"type": ["array", "null"], "items": {"type": "string"}},
             "contact_fields": {"type": ["array", "null"], "items": {"type": "string"}},
-            "confirm": {"type": ["boolean", "null"]},
+            "inboxes": {"type": ["array", "null"], "items": {"type": "string"}},
             "closing": {"type": "boolean"},
             "unmappable": {
                 "type": "array",
@@ -106,7 +110,7 @@ RESPONSE_SCHEMA = {
             },
         },
         "required": ["intent_summary", "feature", "connect_requested", "objects",
-                     "account_fields", "contact_fields", "confirm", "closing",
+                     "account_fields", "contact_fields", "inboxes", "closing",
                      "unmappable"],
     },
 }
