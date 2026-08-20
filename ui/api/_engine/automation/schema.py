@@ -262,13 +262,17 @@ ACTIONS = {
                              "question": "Which shared inbox should the conversation be added to?"}}},
     "remove_from_sm": {
         "params": {"inbox": {"required": False}}},
-    # Connector action: fires an app recipe's chain (see RECIPES above). Like
-    # assign_among's distribution method, `recipe` is a structural choice the
-    # user's ask must land on explicitly — the model maps intent to a recipe
-    # id (extract.py routes on RECIPES' descriptions), but the id itself is
-    # required vocabulary, never inferred/defaulted when more than one recipe
-    # exists. With exactly one recipe today this rarely surfaces as a
-    # question in practice, but the check is real and generalizes as-is.
+    # Connector action: fires an app recipe's chain (see RECIPES above), OR —
+    # when nothing in RECIPES matches — a dynamically-composed `custom_plan`
+    # (automation/planner.py + plan_validator.py) built from the generic
+    # Salesforce object/field catalog (salesforce_schema.py). Exactly one of
+    # `recipe` / `custom_plan` is expected; that "which one, and is the one
+    # present actually valid" logic lives in automation/validator.py's
+    # dedicated connector block, NOT the generic required/enum loop below —
+    # `custom_plan` is a nested structure (steps + terminal), not a scalar
+    # the generic per-param machinery understands, so `recipe` is marked
+    # optional here on purpose (it's required only in the absence of a valid
+    # custom_plan; the connector block enforces that, not this dict).
     #
     # test_contact_email is this recipe's ONE setup-time slot — a real contact
     # address to test-run the chain against before the rule is marked done
@@ -276,9 +280,12 @@ ACTIONS = {
     # it carries provenance like any other free-text value. Do NOT assume a
     # future recipe needs this same single-slot shape — a recipe with its own
     # config needs (see the RECIPES comment) needs its own param design; this
-    # is only what recipe #1 happens to need.
+    # is only what recipe #1 happens to need. A custom_plan needs the same
+    # test-run proof, and is held to a STRICTER bar for it (see validator.py):
+    # an unproven plan must actually succeed once before it counts as done,
+    # not just supply an email.
     "connector": {
-        "params": {"recipe": {"required": True, "provenance": False,
+        "params": {"recipe": {"required": False, "provenance": False,
                               "enum": list(RECIPES),
                               "enum_labels": {rid: r["name"] for rid, r in RECIPES.items()},
                               "question": "Which app automation should this run?"},

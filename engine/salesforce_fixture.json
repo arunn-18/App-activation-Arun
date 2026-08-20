@@ -6,10 +6,10 @@
     {"contact_id": "003D1", "email": "arunnayak.b@grexit.com", "account_id": "001D1"}
   ],
   "accounts": [
-    {"account_id": "001A1", "name": "Acme Corp"},
-    {"account_id": "001B1", "name": "Globex Inc"},
-    {"account_id": "001C1", "name": "Initech LLC"},
-    {"account_id": "001D1", "name": "Grexit Technologies"}
+    {"account_id": "001A1", "name": "Acme Corp", "owner_email": "marcus.lee@hiver.example"},
+    {"account_id": "001B1", "name": "Globex Inc", "owner_email": "wes.kim@hiver.example"},
+    {"account_id": "001C1", "name": "Initech LLC", "owner_email": "owner.initech@hiver.example"},
+    {"account_id": "001D1", "name": "Grexit Technologies", "owner_email": "owner.grexit@hiver.example"}
   ],
   "account_team": [
     {"account_id": "001A1", "user_id": "005A1", "name": "Priya Shah",
@@ -22,5 +22,17 @@
      "email": "dee.osei@hiver.example", "role": "CSM"},
     {"account_id": "001D1", "user_id": "005D1", "name": "Ava Chen",
      "email": "ava.chen@hiver.example", "role": "CSM"}
+  ],
+  "opportunities": [
+    {"opportunity_id": "006A1", "account_id": "001A1", "name": "Acme Renewal Q3",
+     "stage": "Negotiation", "amount": 50000, "owner_email": "marcus.lee@hiver.example"},
+    {"opportunity_id": "006B1", "account_id": "001B1", "name": "Globex Expansion",
+     "stage": "Closed Won", "amount": 120000, "owner_email": "wes.kim@hiver.example"}
+  ],
+  "cases": [
+    {"case_id": "500A1", "account_id": "001A1", "subject": "Acme - login issue",
+     "priority": "High", "status": "Open", "owner_email": "marcus.lee@hiver.example"},
+    {"case_id": "500D1", "account_id": "001D1", "subject": "Grexit - billing question",
+     "priority": "Medium", "status": "Open", "owner_email": "owner.grexit@hiver.example"}
   ]
 }

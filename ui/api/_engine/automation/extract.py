@@ -13,8 +13,10 @@ this was even called.
 """
 import json
 
+import salesforce_schema
 import workspace as wsmod
 
+from . import planner
 from . import schema
 
 MODEL = "gpt-4o"
@@ -40,6 +42,9 @@ def _vocab_block():
                  "it sounds):")
     for rid, r in schema.RECIPES.items():
         lines.append(f"  {rid} ({r['app']}) — {r['description']}")
+    lines.append("SALESFORCE OBJECTS available for a connector's custom_plan (see rule 19b) — "
+                 "call describe_object on one before referencing its fields, never guess a "
+                 "field name: " + ", ".join(sorted(salesforce_schema.OBJECTS)))
     lines.append("UNSUPPORTED (recognize, put in unsupported_requests, never emit as actions): "
                  + "; ".join(f"{k} ({v})" for k, v in schema.UNSUPPORTED.items()))
     return "\n".join(lines)
@@ -176,14 +181,44 @@ EXTRACTION RULES:
    ONE recipe — match it ONLY when the request clearly wants what its
    description says (assigning/routing conversations to a Salesforce
    Account's CSM). Do not get creative because little else is defined: a
-   request for ANY other connector/integration/CRM action — a different
-   Salesforce action, HubSpot, ClickUp, a generic "call our API", a webhook —
-   is NOT this recipe. For those, add "connector_other" reasoning to
-   unsupported_requests (never invent a fake recipe id, never leave `recipe`
-   null hoping the code will ask — with one recipe there is nothing to ask,
-   only a match or a clean escalation). test_contact_email is filled ONLY
-   from an email address the user actually wrote, exactly like any other
+   request for a DIFFERENT Salesforce action this recipe doesn't cover (see
+   rule 19b before giving up on it) is not this recipe; a request for a
+   NON-Salesforce integration (HubSpot, ClickUp, a generic "call our API", a
+   webhook) is NOT buildable at all here — add "connector_other" reasoning to
+   unsupported_requests for those (never invent a fake recipe id, never leave
+   `recipe` null hoping the code will ask — with one recipe there is nothing
+   to ask, only a match or a clean escalation). test_contact_email is filled
+   ONLY from an email address the user actually wrote, exactly like any other
    provenance-guarded value (rule 1).
+19b. Dynamic connector plans (custom_plan): when a Salesforce-connector-shaped
+   ask does NOT match the one CONNECTOR RECIPES entry, but IS a "look up some
+   Salesforce data about this account/contact, then assign or tag the
+   conversation based on it" request (e.g. "assign new conversations to the
+   Account Owner instead of the CSM", "tag it with the Case's priority when
+   there's an open case"), attempt to compose a custom_plan INSTEAD of
+   escalating to unsupported_requests:
+   - Call describe_object (and list_objects if you need to see what exists
+     first) to learn REAL field names before writing a step — never guess one.
+   - steps: an ORDERED list of {{object, where, extract_variables}} lookups,
+     each `where` clause filtering by a field that either came from a PRIOR
+     step's extract_variables or is the seed `contact_email` (the sender's
+     address is always available as {{{{contact_email}}}} for the first
+     step's Contact lookup, exactly like the recipe above). Every `field` you
+     reference — in `where` or `extract_variables` — must be one
+     describe_object actually returned for that object. Maximum 4 steps.
+   - terminal: exactly one of {{kind: "assign", target: "{{{{var}}}}"}} or
+     {{kind: "add_tag", tags: ["{{{{var}}}}"]}}, where `{{{{var}}}}` is a
+     variable an EARLIER step's extract_variables produced — never a literal
+     value, never a field you haven't actually extracted.
+   - plan_summary: ONE plain-English sentence describing what the plan does,
+     for the admin to read (they will never see the raw steps by default).
+   - If no plausible chain of real objects/fields gets from the seed contact
+     to a sensible assign/tag source, do NOT force one — leave custom_plan
+     null and use "connector_other" in unsupported_requests instead, exactly
+     like rule 19's clean escalation. A wrong plan that merely LOOKS
+     plausible is far worse than an honestly declared gap.
+   - recipe and custom_plan are mutually exclusive: never fill both on the
+     same action.
 """
 
 RESPONSE_SCHEMA = {
@@ -230,11 +265,73 @@ RESPONSE_SCHEMA = {
                         "recipe": {"type": ["string", "null"],
                                   "enum": list(schema.RECIPES) + [None]},
                         "test_contact_email": {"type": ["string", "null"]},
+                        # A dynamically-composed connector plan (rule 19b) — the
+                        # OTHER way to fill a connector action when no RECIPES
+                        # entry matches. extract_variables is an array of
+                        # {variable, field} pairs, not a {name: field} map:
+                        # strict-mode JSON schema can't express an
+                        # arbitrary-key object, only fixed-shape ones (see
+                        # plan_validator.py, which converts this wire shape
+                        # into the dict run_chain() actually uses).
+                        "custom_plan": {
+                            "type": ["object", "null"], "additionalProperties": False,
+                            "properties": {
+                                "app": {"type": "string", "enum": ["salesforce"]},
+                                "plan_summary": {"type": "string"},
+                                "steps": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "properties": {
+                                            "object": {"type": "string",
+                                                      "enum": list(salesforce_schema.OBJECTS)},
+                                            "where": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "additionalProperties": False,
+                                                    "properties": {
+                                                        "field": {"type": "string"},
+                                                        "eq": {"type": "string"},
+                                                    },
+                                                    "required": ["field", "eq"],
+                                                },
+                                            },
+                                            "extract_variables": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "additionalProperties": False,
+                                                    "properties": {
+                                                        "variable": {"type": "string"},
+                                                        "field": {"type": "string"},
+                                                    },
+                                                    "required": ["variable", "field"],
+                                                },
+                                            },
+                                        },
+                                        "required": ["object", "where", "extract_variables"],
+                                    },
+                                },
+                                "terminal": {
+                                    "type": "object", "additionalProperties": False,
+                                    "properties": {
+                                        "kind": {"type": "string",
+                                                "enum": ["assign", "add_tag"]},
+                                        "target": {"type": ["string", "null"]},
+                                        "tags": {"type": ["array", "null"],
+                                                "items": {"type": "string"}},
+                                    },
+                                    "required": ["kind", "target", "tags"],
+                                },
+                            },
+                            "required": ["app", "plan_summary", "steps", "terminal"],
+                        },
                     },
                     "required": ["type", "tags", "target", "targets", "status_value",
                                  "distribution", "content", "pinned",
                                  "email_enabled", "inbox", "body_hint",
-                                 "recipe", "test_contact_email"],
+                                 "recipe", "test_contact_email", "custom_plan"],
                 },
             },
             "ai_extract": {
@@ -299,31 +396,41 @@ def build_system(ws=None):
     return SYSTEM + WORKSPACE_RULES if ws else SYSTEM
 
 
+_PLANNER_TOOL_NAMES = {t["function"]["name"] for t in planner.TOOLS}
+
+
 def extract(client, messages, model=MODEL, ws=None, on_event=None):
     """messages: [{role, content}] chat history. Returns the parsed spec dict.
-    With a workspace, runs a bounded tool-calling loop before the final spec.
-    on_event (optional): called with progress dicts as real pipeline steps happen
-    (currently one per workspace tool call) — the honest feed for UI progress."""
+    Runs a bounded tool-calling loop before the final spec: planner.TOOLS
+    (list_objects/describe_object) are ALWAYS available, so a connector ask
+    can be explored into a custom_plan (rule 19b) whether or not a workspace
+    is connected — those tools describe Salesforce's own schema, not
+    workspace entities, so they don't depend on ws the way wsmod.TOOLS does.
+    wsmod.TOOLS are added on top when ws is supplied, exactly as before.
+    on_event (optional): called with progress dicts as real pipeline steps
+    happen (one per tool call) — the honest feed for UI progress."""
     msgs = [{"role": "system", "content": build_system(ws)}] + messages
     kwargs = dict(model=model, temperature=0, max_tokens=2000,
                   response_format={"type": "json_schema", "json_schema": RESPONSE_SCHEMA})
-    if ws:
-        for _ in range(MAX_TOOL_ROUNDS):
-            resp = client.chat.completions.create(messages=msgs, tools=wsmod.TOOLS,
-                                                  **kwargs)
-            m = resp.choices[0].message
-            if not m.tool_calls:
-                return json.loads(m.content)
-            msgs.append({"role": "assistant", "content": m.content,
-                         "tool_calls": [tc.model_dump() for tc in m.tool_calls]})
-            for tc in m.tool_calls:
-                args = json.loads(tc.function.arguments or "{}")
-                if on_event:
-                    on_event({"stage": "lookup", "tool": tc.function.name,
-                              "query": args.get("name", "")})
-                msgs.append({"role": "tool", "tool_call_id": tc.id,
-                             "content": wsmod.dispatch(ws, tc.function.name, args)})
-        # tool budget exhausted: force a final spec without tools
+    tools = list(planner.TOOLS) + (list(wsmod.TOOLS) if ws else [])
+    for _ in range(MAX_TOOL_ROUNDS):
+        resp = client.chat.completions.create(messages=msgs, tools=tools, **kwargs)
+        m = resp.choices[0].message
+        if not m.tool_calls:
+            return json.loads(m.content)
+        msgs.append({"role": "assistant", "content": m.content,
+                     "tool_calls": [tc.model_dump() for tc in m.tool_calls]})
+        for tc in m.tool_calls:
+            args = json.loads(tc.function.arguments or "{}")
+            if on_event:
+                on_event({"stage": "lookup", "tool": tc.function.name,
+                          "query": args.get("name") or args.get("object_name", "")})
+            if tc.function.name in _PLANNER_TOOL_NAMES:
+                content = planner.dispatch(tc.function.name, args)
+            else:
+                content = wsmod.dispatch(ws, tc.function.name, args)
+            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": content})
+    # tool budget exhausted: force a final spec without tools
     resp = client.chat.completions.create(messages=msgs, **kwargs)
     try:
         return json.loads(resp.choices[0].message.content)

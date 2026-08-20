@@ -75,9 +75,14 @@ _TOPICS = [
      "the set."),
     (("integrat", "connector", "salesforce", "hubspot", "clickup", "custom field",
       "custom object", "approval", "sla", "webhook", "api"),
-     "One connector recipe is supported so far: " + next(iter(schema.RECIPES.values()))["name"]
-     + " — " + next(iter(schema.RECIPES.values()))["description"] + " Everything else here "
-     "isn't yet: " + "; ".join(schema.UNSUPPORTED.values())
+     "One connector recipe is ready-made: " + next(iter(schema.RECIPES.values()))["name"]
+     + " — " + next(iter(schema.RECIPES.values()))["description"] + " Beyond that, I can "
+     "also compose a Salesforce lookup on the fly for other asks that fit the same shape "
+     "— look up data about the sender's Account/Contact/Opportunity/Case, then assign or "
+     "tag the conversation based on it (e.g. assign to the Account Owner instead of the "
+     "CSM, or tag by a Case's priority) — verified with a real test run before it counts "
+     "as done, never just assumed to work. Everything else here isn't yet: "
+     + "; ".join(schema.UNSUPPORTED.values())
      + ". I'll always say so rather than fake one of these."),
 ]
 

@@ -195,15 +195,24 @@ function ActionLine({ a }: { a: Action }) {
       // recipe is a raw id (engine/schema.py RECIPES key) — the engine has no
       // vocabulary endpoint for recipe display names yet (only trigger/
       // property labels, via /api/vocabulary), so this falls back to the id
-      // itself rather than inventing a lookup the backend doesn't serve.
-      const recipeLabel =
-        a.recipe === "salesforce_account_csm_autoassign"
+      // itself rather than inventing a lookup the backend doesn't serve. A
+      // custom_plan (v2.11) has no id at all — it names itself via
+      // plan_summary, the model's own plain-English description.
+      const recipeLabel = a.custom_plan
+        ? `dynamically-composed plan — ${a.custom_plan.plan_summary}`
+        : a.recipe === "salesforce_account_csm_autoassign"
           ? "Auto-assign to the account's CSM (Salesforce)"
           : a.recipe;
+      const terminalLine = a.assigns_to
+        ? <> → then assign the conversation to <span className="font-mono">{a.assigns_to}</span> (extracted from Salesforce)</>
+        : a.tags_with
+          ? <> → then tag the conversation with <span className="font-mono">{a.tags_with}</span> (extracted from Salesforce)</>
+          : null;
       return (
         <>
           run connector recipe — {need(recipeLabel, "which recipe?")}, test with{" "}
           {need(a.test_contact_email, "a real contact email?")}
+          {terminalLine}
         </>
       );
     }
@@ -226,8 +235,17 @@ function TestRunStrip({ testRun }: { testRun: ConnectorTestRun }) {
       <div className="border-b border-hairline px-5 py-2.5">
         <div className="flex items-center justify-between gap-3">
           <span className="text-[12.5px] text-ink-soft">
-            <span className="font-medium text-ink">Test run: assigned to</span>{" "}
-            <span className="font-mono text-[12px]">{testRun.final.target}</span>.
+            {testRun.final.type === "assign" ? (
+              <>
+                <span className="font-medium text-ink">Test run: assigned to</span>{" "}
+                <span className="font-mono text-[12px]">{testRun.final.target}</span>.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-ink">Test run: tagged with</span>{" "}
+                <span className="font-mono text-[12px]">{testRun.final.tags.join(", ")}</span>.
+              </>
+            )}
           </span>
           <button
             onClick={() => setOpen((o) => !o)}
@@ -245,7 +263,7 @@ function TestRunStrip({ testRun }: { testRun: ConnectorTestRun }) {
       <div className="flex items-center justify-between gap-3">
         <span className="text-[12.5px] text-destructive">
           <span className="font-semibold">
-            Test run: nothing was assigned
+            Test run: nothing happened
           </span>
           {testRun.reason ? ` — ${testRun.reason}.` : "."}
         </span>
@@ -272,8 +290,10 @@ function TestRunSteps({ steps }: { steps: ConnectorTestRunStep[] }) {
               {s.response?.totalSize ?? 0} record
               {s.response?.totalSize === 1 ? "" : "s"}
             </>
-          ) : (
+          ) : s.kind === "assign" ? (
             <>assign → {s.target}</>
+          ) : (
+            <>add_tag → {(s.tags ?? []).join(", ")}</>
           )}
         </p>
       ))}

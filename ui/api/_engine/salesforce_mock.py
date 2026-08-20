@@ -1,9 +1,10 @@
 """Mock Salesforce service — SHARED between both tracks: automation/
 executor.py's connector recipe chain calls find_contact_by_email/
-get_account_team_csm; apps/setup.py's Track A field-config step calls
-describe_fields. It lives at the top level (not inside either automation/
-or apps/) because it isn't automation- or app-setup-specific — it's "what
-Salesforce itself would say," which both tracks legitimately need.
+get_account_team_csm (and, for a dynamically-composed plan, the generic
+query()); apps/setup.py's Track A field-config step calls describe_fields.
+It lives at the top level (not inside either automation/ or apps/) because
+it isn't automation- or app-setup-specific — it's "what Salesforce itself
+would say," which both tracks legitimately need.
 
 Functions here are the "ops" automation/executor.py's chain runner calls by
 name (recipe step {"kind": "api_call", "op": "find_contact_by_email", ...}).
@@ -18,12 +19,21 @@ The CSM-vs-AE filtering lives HERE, in get_account_team_csm — it queries
 See the SHAPED-BY-ONE-EXAMPLE note on automation/schema.py's RECIPES for why
 that's a deliberate scoping choice, not an oversight.
 
+query()/describe_object()/list_objects() are the GENERIC primitives a
+dynamically-composed connector plan (automation/planner.py) uses instead of
+a named, hand-written op — every hardcoded op below (find_contact_by_email,
+get_account_team_csm, get_account_team) is itself expressible as one query()
+call with the right `where` filter; they stay as named wrappers only
+because RECIPES' one hand-vetted chain and its tests already refer to them
+by name, not because query() can't do what they do.
+
 Prototype reads salesforce_fixture.json; production would call the real
 Salesforce API with the org's connected credentials.
 """
 import json
 from pathlib import Path
 
+import salesforce_schema
 from apps import schema as apps_schema
 
 DEFAULT_PATH = Path(__file__).parent / "salesforce_fixture.json"
@@ -84,3 +94,58 @@ def describe_fields(object_name):
     fields = ([{"name": f, "kind": "standard"} for f in catalog["standard"]]
              + [{"name": f, "kind": "custom"} for f in catalog["custom"]])
     return {"success": True, "object": object_name, "fields": fields}
+
+
+# ------------------------------------------------------------- generic ops
+# The primitives automation/planner.py's dynamically-composed connector
+# plans run on, and the tools it explores the schema with before proposing
+# one — see salesforce_schema.py for the closed object/field catalog these
+# read from. A plan step can query() ONLY an object/field declared there;
+# there is no way to reach fixture data outside that catalog through these
+# functions, by construction (list_objects/describe_object are the only way
+# the planner learns what exists, and query() itself validates against the
+# same catalog it advertises).
+
+def list_objects():
+    """Every object name the generic query()/describe_object() ops know
+    about — what automation/planner.py's list_objects tool returns, so the
+    model can only ever plan against real, declared objects."""
+    return sorted(salesforce_schema.OBJECTS)
+
+
+def describe_object(object_name):
+    """Field names + types for one object (see salesforce_schema.OBJECTS) —
+    the generic, multi-object analogue of describe_fields() above (which is
+    Track A's read-only display-field lookup, scoped to apps.schema's
+    FIELD_CATALOG). Returns success: False for an object outside the
+    catalog, the same honest-gap stance describe_fields() already takes."""
+    obj = salesforce_schema.OBJECTS.get(object_name)
+    if obj is None:
+        return {"success": False, "object": object_name, "fields": []}
+    return {"success": True, "object": object_name,
+            "fields": [{"name": f, "type": t} for f, t in obj["fields"].items()]}
+
+
+def query(object_name, where=None, fields=None, fixture=None):
+    """Generic SOQL-like lookup: object_name -> the fixture table it maps to
+    (salesforce_schema.OBJECTS[object_name]['table']), where -> a list of
+    {"field", "eq"} equality filters, ANDed together (this is the one
+    filter shape every hand-written op above already uses under the hood —
+    get_account_team_csm is just this with where=[account_id, role=CSM]).
+    `fields` is informational only (the full record is always returned, so
+    a plan's extract_variables can pull whatever real field it needs);
+    unknown object -> an empty, not-erroring envelope, same "no records"
+    shape a real SOQL query against a nonexistent filter would produce —
+    plan_validator.py is what actually rejects an unknown object/field
+    before this is ever called."""
+    obj = salesforce_schema.OBJECTS.get(object_name)
+    if obj is None:
+        return _envelope([])
+    fixture = fixture if fixture is not None else load()
+    records = fixture.get(obj["table"], [])
+    where = where or []
+
+    def matches(r):
+        return all(str(r.get(w.get("field"))) == str(w.get("eq")) for w in where)
+
+    return _envelope([r for r in records if matches(r)])

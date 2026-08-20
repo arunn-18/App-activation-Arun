@@ -451,6 +451,105 @@ now vendors `automation/` and `apps/` as real subpackages (not flattened)
 and its self-import check verifies every module inside each, the same
 denylist-not-allowlist guarantee it already had for the top level.
 
+## Dynamic connector plans + Track A inbox scoping (v2.11, 2026-08-20)
+
+Two product asks after the v2.10 restructuring: more automation/App use
+cases, and — the harder one — "you have still not figured out the flow for
+finding the APIs by yourself and using them accordingly in the automations
+to get to the usecases user is asking for." Given the choice between
+hand-authoring more `RECIPES` entries or a genuine dynamic-composition
+capability, the direction chosen was the latter, WITH explicit guardrails
+(the user's own follow-up ask) — a model composing its own API call
+sequence at runtime is a real capability increase, not something to ship
+without a safety design.
+
+**Track A:** the final "Enable?" step (a plain yes/no CTA) is now a
+multi-select of the workspace's shared inboxes — naming inbox(es) IS the
+enable action, since a feature like account/contact cards is meaningfully
+scoped per inbox, not a single global switch. `apps/setup.py`'s step 4
+replaced the old boolean `confirm` slot; `apps/extract.py` captures
+whichever inbox names the user answers with; `FeatureCard.tsx` and
+`copilot.render_feature()` show an "ENABLED FOR" line once chosen.
+
+**Track B — the harder half — dynamic connector plans.** `RECIPES` stays
+exactly what it was: a small set of hand-vetted, fully-tested chains — the
+fast, fully-trusted path. New alongside it: when a Salesforce-connector ask
+doesn't match any RECIPES entry but IS the same *shape* (look up some
+Salesforce data about the sender's account/contact, then assign or tag the
+conversation based on it), the model can compose its OWN chain at
+extraction time instead of the request being escalated straight to
+`unsupported_requests`.
+
+- **`salesforce_schema.py`** (new, top-level, shared): the closed CRM object
+  catalog — Contact/Account/AccountTeamMember/Opportunity/Case, their real
+  field names, and (critically) which fields are marked `assignable_fields`
+  / `taggable_fields` — a deliberate claim about which values make sense as
+  a connector's terminal action, not an accident of a field merely existing.
+- **`salesforce_mock.py`** gained generic `query()`/`describe_object()`/
+  `list_objects()` primitives — every hand-written op (`find_contact_by_email`,
+  `get_account_team_csm`, ...) is itself expressible as one `query()` call
+  with the right filter; they stay as named wrappers only because the
+  existing recipe and its tests already refer to them by name.
+- **`automation/planner.py`** (new): read-only exploration tools
+  (`list_objects`, `describe_object`) the extractor calls before proposing a
+  plan — mirrors `workspace.py`'s existing TOOLS/dispatch pattern exactly.
+  Wired into `automation/extract.py`'s SAME bounded tool-calling loop
+  (previously gated on a workspace being connected; these tools now run
+  regardless, since they describe Salesforce's own schema, not workspace
+  entities).
+- **`automation/extract.py`** rule 19b: a connector action's `custom_plan` is
+  an ordered list of `{object, where, extract_variables}` lookup steps (built
+  as arrays of `{variable, field}` pairs, not a `{name: field}` map — OpenAI
+  strict-mode JSON schema can't express an arbitrary-key object) plus one
+  `{kind: assign|add_tag, ...}` terminal — never both `recipe` and
+  `custom_plan` on the same action, and never a forced plan when no
+  plausible chain exists (falls back to `connector_other`, same honest
+  escalation rule 19 already had).
+
+**The guardrails** (`automation/plan_validator.py`, new) — a model-composed
+plan gets NO benefit of the doubt, unlike a RECIPES chain a human already
+proved correct:
+- every object/field referenced must be real, per `salesforce_schema.py`
+- every step's filter value must chain from the seed context or a variable
+  an EARLIER step actually extracted — never a forward/undefined reference
+- the terminal's value must come from a field explicitly marked usable for
+  that action kind — a real field holding a string (e.g. `Case.Subject`) is
+  NOT automatically legal as an assign/tag source
+- bounded to `MAX_PLAN_STEPS` (4)
+- **a stricter completeness bar than a fixed recipe gets**: `automation/
+  validator.py`'s connector block actually EXECUTES a structurally-valid
+  plan against the mock as part of validation, and only counts it toward
+  `status: complete` if that run comes back `"ok"` — a `no_match` is a
+  legitimate outcome for a RECIPES chain (already proven correct once by
+  `test_connector.py`) but NOT proof enough for a plan that's never
+  succeeded before. `executor.py` itself needed no new step kinds beyond
+  `add_tag`; `_fill()`/`_unresolved()` learned to recurse into the plan's
+  structured `where`-clause args, and a validated plan converts
+  (`plan_validator.to_chain()`) into the exact same `{"app", "chain"}` shape
+  `run_chain()` already ran a RECIPES entry through.
+
+**Two use cases prove genericity** (no RECIPES entry involved for either):
+assign to the Account's Owner instead of the CSM (2-step: Contact ->
+Account), and tag the conversation with an open Case's priority (2-step:
+Contact -> Case). Both run end-to-end against the mock fixture
+(`salesforce_fixture.json` gained `opportunities`/`cases` tables and a
+per-account `owner_email`, including a real entry for
+`arunnayak.b@grexit.com`).
+
+**Testing:** `test_connector_planner.py` (new, 18 cases, pure code, no LLM)
+covers every guardrail rejection individually, both dynamic use cases
+end-to-end (structural validation -> prerequisite check -> real test-run ->
+`complete`), the stricter no-proof-no-complete bar, prerequisite gating on a
+dynamic plan same as a fixed recipe, the fallback question when neither
+`recipe` nor a valid `custom_plan` is present, and `copilot.py`'s rendering
+(draft text, exported JSON's `custom_plan`/`assigns_to`/`tags_with`,
+`connector_test_run`) for a plan-based action. The actual tool-calling
+composition step (a live model turning "assign by Account Owner" into a
+correct plan) is, like the fixed recipe's own routing, not verifiable in
+this sandbox (no `OPENAI_API_KEY`) — everything downstream of "the model
+proposed this plan" is. No regressions: validator 56/56 core + 58/58 units,
+connector 27/27, track A 29/29.
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session

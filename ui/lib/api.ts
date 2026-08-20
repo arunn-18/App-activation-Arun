@@ -44,6 +44,39 @@ export interface Action {
    *  the chain against before the rule is marked done. */
   recipe?: string | null;
   test_contact_email?: string | null;
+  /** A dynamically-composed connector plan (v2.11) — the OTHER way to fill a
+   *  connector action when no RECIPES entry matches: the engine composed its
+   *  own lookup chain from the Salesforce object/field catalog instead of
+   *  following a fixed recipe. Mutually exclusive with `recipe`. */
+  custom_plan?: ConnectorPlan | null;
+  /** Derived, read-only: the recipe's or plan's own terminal chain step,
+   *  surfaced generically so the draft/final JSON show what the connector
+   *  actually does end to end (look up data, then act on it), not just that
+   *  it ran. Exactly one of the two is set, matching the terminal kind. */
+  assigns_to?: string | null;
+  tags_with?: string | null;
+}
+
+/** One lookup step of a dynamically-composed connector plan (v2.11) — see
+ *  automation/plan_validator.py. `eq` values may carry a {{variable}} ref to
+ *  an earlier step's own extract_variables entry. */
+export interface ConnectorPlanStep {
+  object: string;
+  where: { field: string; eq: string }[];
+  extract_variables: { variable: string; field: string }[];
+}
+
+export interface ConnectorPlanTerminal {
+  kind: "assign" | "add_tag";
+  target: string | null;
+  tags: string[] | null;
+}
+
+export interface ConnectorPlan {
+  app: string;
+  plan_summary: string;
+  steps: ConnectorPlanStep[];
+  terminal: ConnectorPlanTerminal;
 }
 
 export interface Spec {
@@ -89,25 +122,30 @@ export interface Assumption {
   question: string;
 }
 
-/** One step of a connector recipe's chain, as actually run (engine/executor.py
- *  run_chain()) — raw request/response, not a description of one. */
+/** One step of a connector recipe's (or dynamic plan's) chain, as actually
+ *  run (engine/executor.py run_chain()) — raw request/response, not a
+ *  description of one. */
 export interface ConnectorTestRunStep {
-  kind: "api_call" | "assign";
+  kind: "api_call" | "assign" | "add_tag";
   op?: string;
   args?: Record<string, unknown>;
   response?: { totalSize: number; done: boolean; records: Record<string, unknown>[] };
   target?: string;
+  tags?: string[];
 }
 
-/** Result of test-running a completed connector rule's recipe (v2.8) — the
- *  connector analogue of the preview dry-run every other rule gets: proof the
- *  rule does something real, before it's marked done. "no_match" is a clean,
- *  valid outcome (e.g. the test contact's account has no CSM), not an error. */
+/** Result of test-running a completed connector rule's recipe or dynamic
+ *  plan (v2.8, v2.11) — the connector analogue of the preview dry-run every
+ *  other rule gets: proof the rule does something real, before it's marked
+ *  done. "no_match" is a clean, valid outcome for a fixed recipe (e.g. the
+ *  test contact's account has no CSM) — NOT for a dynamic plan, which the
+ *  engine requires to actually succeed before it ever reaches this
+ *  "complete" state at all (see automation/validator.py's connector block). */
 export interface ConnectorTestRun {
   status: "ok" | "no_match" | "error";
   steps: ConnectorTestRunStep[];
   variables: Record<string, unknown>;
-  final: { type: "assign"; target: string } | null;
+  final: { type: "assign"; target: string } | { type: "add_tag"; tags: string[] } | null;
   reason?: string;
 }
 

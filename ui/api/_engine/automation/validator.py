@@ -19,6 +19,8 @@ import re
 import connected_apps
 import workspace as wsmod
 
+from . import executor
+from . import plan_validator
 from . import schema
 
 MAX_QUESTIONS = 3
@@ -548,35 +550,85 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
                     _resolve_entity(ws, kind, v, f"actions[{ai}].{pname}",
                                     missing, resolutions, entity_notes)
 
-    # ---- connector: recipe prerequisites -------------------------------------
-    # Recipe EXISTENCE and the "recipe id is required, non-inferred vocabulary"
-    # check both fall out of the generic required/enum machinery above for
-    # free (recipe is just another ACTIONS param with an enum) — this block
-    # only adds what's specific to connectors: re-verifying the CHOSEN
-    # recipe's prerequisites against the connected-apps fixture, the same
-    # re-verification stance workspace entities get elsewhere in this
-    # function (the model's own say-so that something is buildable is never
-    # trusted alone).
-    #
-    # GENERIC (keep for recipe #2+): this loop is entirely data-driven off
-    # recipe["prerequisites"] — it needs no per-recipe code.
+    # ---- connector: recipe / dynamic plan validation, then prerequisites -----
+    # Recipe EXISTENCE and enum-legality (when `recipe` is non-null) still fall
+    # out of the generic required/enum machinery above for free. But `recipe`
+    # is no longer unconditionally required (schema.py) — custom_plan is the
+    # OTHER way to satisfy a connector action — so "is at least one of the two
+    # present, and is whichever one is present actually valid" is entirely
+    # this block's job now. Three outcomes per connector action, in order:
+    #   1. recipe set -> re-verify ITS prerequisites, exactly as before
+    #      custom_plan existed (GENERIC, data-driven off recipe["prerequisites"];
+    #      SHAPED BY ONE EXAMPLE: skipped when apps_ws is None — see below).
+    #   2. no recipe, but custom_plan set -> plan_validator.validate_plan()
+    #      structurally FIRST (a dynamically-composed plan gets no benefit of
+    #      the doubt — see that module's docstring for the full guardrail
+    #      list), then the same prerequisite re-check, then an ACTUAL test-run
+    #      against the mock that must come back "ok" — not just "provided a
+    #      test email" — before this ever counts toward completeness. A
+    #      hand-vetted RECIPES chain doesn't need this extra bar because
+    #      test_connector.py already proved it correct once; a plan the model
+    #      composed this turn has proven nothing yet.
+    #   3. neither present -> the original "which app automation should this
+    #      run" blocking question (recipe used to be plain-required for this
+    #      before custom_plan became the other way to satisfy it).
     # SHAPED BY ONE EXAMPLE: only runs when apps_ws is supplied. None means
     # "no connected-app context" (eval/CLI runs, or the Automations-panel demo
-    # before it loads the fixture) — the check is SKIPPED rather than failing
-    # every connector rule callers that don't pass one haven't opted into.
-    if apps_ws is not None:
-        for ai, action in enumerate(spec.get("actions") or []):
-            if action.get("type") != "connector":
+    # before it loads the fixture) — the prerequisite check is SKIPPED rather
+    # than failing every connector rule callers that don't pass one haven't
+    # opted into; structural validation and the test-run bar run regardless,
+    # since those need no workspace context.
+    for ai, action in enumerate(spec.get("actions") or []):
+        if action.get("type") != "connector":
+            continue
+        recipe = schema.RECIPES.get(action.get("recipe"))
+        plan = action.get("custom_plan")
+
+        if recipe is not None:
+            if apps_ws is not None:
+                unmet = connected_apps.prerequisites_met(apps_ws, recipe["app"],
+                                                         recipe["prerequisites"])
+                if unmet:
+                    labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
+                    errors.append(f"action {ai + 1}: '{recipe['name']}' isn't buildable "
+                                  "yet — " + "; ".join(labels))
+            continue
+
+        if plan:
+            plan_errors = plan_validator.validate_plan(
+                plan, {"contact_email": action.get("test_contact_email") or ""})
+            if plan_errors:
+                errors.append(f"action {ai + 1}: this connector plan isn't safe to run — "
+                              + "; ".join(plan_errors))
                 continue
-            recipe = schema.RECIPES.get(action.get("recipe"))
-            if recipe is None:
-                continue  # missing/unknown recipe id already flagged above
-            unmet = connected_apps.prerequisites_met(apps_ws, recipe["app"],
-                                                     recipe["prerequisites"])
-            if unmet:
-                labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
-                errors.append(f"action {ai + 1}: '{recipe['name']}' isn't buildable yet — "
-                              + "; ".join(labels))
+            if apps_ws is not None:
+                unmet = connected_apps.prerequisites_met(
+                    apps_ws, plan.get("app", "salesforce"), ["salesforce_connected"])
+                if unmet:
+                    labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
+                    errors.append(f"action {ai + 1}: this connector plan isn't buildable "
+                                  "yet — " + "; ".join(labels))
+                    continue
+            test_email = action.get("test_contact_email")
+            if test_email:
+                proof = executor.run_chain(plan_validator.to_chain(plan),
+                                           {"contact_email": test_email})
+                if proof["status"] != "ok":
+                    errors.append(
+                        f"action {ai + 1}: this connector plan's test run with "
+                        f"'{test_email}' didn't succeed — "
+                        f"{proof.get('reason', 'no result produced')}. Try a different "
+                        "test contact, or check that the ask names real Salesforce data.")
+            continue
+
+        rparam = schema.ACTIONS["connector"]["params"]["recipe"]
+        labels = rparam.get("enum_labels") or {}
+        missing.append({
+            "slot": f"actions[{ai}].recipe", "question": rparam["question"],
+            "kind": "choice",
+            "options": [{"label": labels.get(v, v), "value": labels.get(v, v)}
+                        for v in rparam["enum"]],
+        })
 
     # ---- {{variable}} references in note bodies must name declared AI variables
     for ni, action in enumerate([] if "ai" in out_of_scope else actions):

@@ -20,6 +20,7 @@ from apps import extract as apps_extract
 from apps import setup as apps_setup
 from automation import executor as automation_executor
 from automation import extract as automation_extract
+from automation import plan_validator as automation_plan_validator
 from automation import schema as automation_schema
 from automation import validator as automation_validator
 
@@ -87,25 +88,38 @@ def _render_action(a):
         return "remove from this shared inbox"
     if t == "connector":
         recipe = automation_schema.RECIPES.get(a.get("recipe"))
-        name = recipe["name"] if recipe else need(a.get("recipe"))
+        plan = a.get("custom_plan")
+        if recipe:
+            name, chain = recipe["name"], recipe.get("chain", [])
+        elif plan:
+            name = f"dynamically-composed plan — {plan.get('plan_summary') or 'unnamed'}"
+            chain = automation_plan_validator.to_chain(plan)["chain"]
+        else:
+            name, chain = need(a.get("recipe")), []
         line = f"run connector recipe — {name}, test-run with {need(a.get('test_contact_email'))}"
-        assign_target = _connector_assign_target(recipe) if recipe else None
-        if assign_target:
-            line += f" → then assign the conversation to {assign_target} (extracted from Salesforce)"
+        terminal = _connector_terminal(chain)
+        if terminal:
+            verb = ("assign the conversation to" if terminal["kind"] == "assign"
+                    else "tag the conversation with")
+            line += f" → then {verb} {terminal['value']} (extracted from Salesforce)"
         return line
     return t
 
 
-def _connector_assign_target(recipe):
-    """The recipe's own terminal `assign` chain step, read generically off
-    RECIPES — not hardcoded to this one recipe's variable name — so the
+def _connector_terminal(chain):
+    """A connector's own terminal chain step (assign or add_tag), read
+    generically off the chain itself — not hardcoded to one recipe's
+    variable name, and works identically for a fixed RECIPES chain or a
+    dynamically-composed plan's chain (plan_validator.to_chain) — so the
     THEN line and the exported JSON both show what the connector actually
-    does end to end (look up data, then assign), not just that it ran.
-    None for a recipe whose chain doesn't end in assign (schema.py's own
-    SHAPED-BY-ONE-EXAMPLE note already flags that as unbuilt)."""
-    for step in recipe.get("chain", []):
+    does end to end (look up data, then act on it), not just that it ran.
+    None for a chain with no terminal step (schema.py's own
+    SHAPED-BY-ONE-EXAMPLE note already flags that as unbuilt for RECIPES)."""
+    for step in chain:
         if step.get("kind") == "assign":
-            return step.get("target")
+            return {"kind": "assign", "value": step.get("target")}
+        if step.get("kind") == "add_tag":
+            return {"kind": "add_tag", "value": ", ".join(step.get("tags") or [])}
     return None
 
 
@@ -180,9 +194,16 @@ def to_final_json(spec):
             actions.append({"type": t, "inboxes": [a["inbox"]] if a.get("inbox") else []})
         elif t == "connector":
             recipe = automation_schema.RECIPES.get(a.get("recipe"))
-            actions.append({"type": "connector", "recipe": a.get("recipe"),
-                            "test_contact_email": a.get("test_contact_email"),
-                            "assigns_to": _connector_assign_target(recipe) if recipe else None})
+            plan = a.get("custom_plan")
+            chain = (recipe.get("chain", []) if recipe
+                    else automation_plan_validator.to_chain(plan)["chain"] if plan else [])
+            terminal = _connector_terminal(chain)
+            actions.append({
+                "type": "connector", "recipe": a.get("recipe"), "custom_plan": plan,
+                "test_contact_email": a.get("test_contact_email"),
+                "assigns_to": terminal["value"] if terminal and terminal["kind"] == "assign" else None,
+                "tags_with": terminal["value"] if terminal and terminal["kind"] == "add_tag" else None,
+            })
     ai_vars = (spec.get("ai_extract") or {}).get("variables") or []
     var_by_name = {v["name"]: v for v in ai_vars if v.get("name")}
 
@@ -265,16 +286,24 @@ def _contributed_app_setup(spec, last_text):
 
 def connector_test_run(spec):
     """If the (complete) automation spec contains a connector action, fire
-    its recipe's chain for real via automation/executor.py using the
-    test_contact_email the admin supplied, and return the result. This is
-    the connector analogue of the draft -> final step every other action
-    type already goes through: those have no external side effect to verify
-    before being marked done, so they need no such check; a connector rule
-    calls a real service, so it does. Returns None when the spec has no
-    connector action (the common case)."""
+    its recipe's chain — OR, for a dynamically-composed custom_plan
+    (automation/planner.py), the validated plan's own chain — for real via
+    automation/executor.py using the test_contact_email the admin supplied,
+    and return the result. This is the connector analogue of the draft ->
+    final step every other action type already goes through: those have no
+    external side effect to verify before being marked done, so they need
+    no such check; a connector rule calls a real service, so it does.
+    Returns None when the spec has no connector action (the common case).
+    A custom_plan action only ever reaches "complete" after validator.py
+    has already proven this exact test run succeeds, so this is a re-run
+    for display, not the first time it's been tried."""
     for a in spec.get("actions") or []:
-        if a.get("type") == "connector" and a.get("recipe") and a.get("test_contact_email"):
+        if a.get("type") != "connector" or not a.get("test_contact_email"):
+            continue
+        if a.get("recipe"):
             return automation_executor.test_run(a["recipe"], a["test_contact_email"])
+        if a.get("custom_plan"):
+            return automation_executor.test_run_plan(a["custom_plan"], a["test_contact_email"])
     return None
 
 

@@ -21,15 +21,20 @@ exception, never a half-run side effect. An `assign` step is terminal: it
 reports what WOULD be assigned; it does not mutate Hiver (this stays a
 test-run capture, like preview.py's dry-run of a final rule).
 
-SHAPED BY HAVING SEEN ONLY ONE EXAMPLE: MOCK_SERVICES only knows Salesforce;
-the chain runner only understands api_call/assign steps (see the matching
-comment on schema.RECIPES) — a recipe #2 needing another step kind or another
-app's mock is exactly the "add a data entry + maybe a new mock service" case
-this was built to make cheap, not something requiring a rewrite here.
+MOCK_SERVICES only knows Salesforce; the chain runner understands
+api_call/assign/add_tag steps. A hand-vetted RECIPES entry only ever uses
+one named op per api_call step; a dynamically-composed plan (see
+automation/planner.py, plan_validator.py) uses the SAME api_call/extract_
+variables shape but calls the generic salesforce_mock.query() op with a
+structured {"object", "where", "fields"} arg instead of a literal one —
+run_chain() itself doesn't know or care which kind of chain it's running,
+which is exactly why the dynamic path needed no executor changes beyond
+_fill()/_unresolved() learning to recurse into that structured arg.
 """
 import re
 
 import salesforce_mock
+from . import plan_validator
 from . import schema
 
 MOCK_SERVICES = {"salesforce": salesforce_mock}
@@ -38,17 +43,30 @@ _VAR_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
 
 def _fill(value, variables):
-    """Template-fill {{name}} refs in a string from `variables`; a ref with
-    no known value is left as literal text (so the caller can detect an
+    """Template-fill {{name}} refs in a string from `variables`, recursing
+    into lists/dicts so a structured arg (a dynamic plan's query `where`
+    clause, e.g. [{"field": "account_id", "eq": "{{account_id}}"}]) gets
+    every embedded ref filled, not just a top-level string. A ref with no
+    known value is left as literal text (so the caller can detect an
     unresolved template rather than silently sending '{{csm_email}}' to a
     mock call, or worse, a real one)."""
-    if not isinstance(value, str):
-        return value
-    return _VAR_RE.sub(lambda m: str(variables.get(m.group(1), m.group(0))), value)
+    if isinstance(value, str):
+        return _VAR_RE.sub(lambda m: str(variables.get(m.group(1), m.group(0))), value)
+    if isinstance(value, list):
+        return [_fill(v, variables) for v in value]
+    if isinstance(value, dict):
+        return {k: _fill(v, variables) for k, v in value.items()}
+    return value
 
 
 def _unresolved(value):
-    return isinstance(value, str) and bool(_VAR_RE.search(value))
+    if isinstance(value, str):
+        return bool(_VAR_RE.search(value))
+    if isinstance(value, list):
+        return any(_unresolved(v) for v in value)
+    if isinstance(value, dict):
+        return any(_unresolved(v) for v in value.values())
+    return False
 
 
 def run_chain(recipe, seed_variables):
@@ -101,6 +119,15 @@ def run_chain(recipe, seed_variables):
             steps_log.append({"kind": "assign", "target": target})
             return {"status": "ok", "steps": steps_log, "variables": variables,
                     "final": {"type": "assign", "target": target}}
+        elif kind == "add_tag":
+            tags = [_fill(t, variables) for t in (step.get("tags") or [])]
+            if not tags or any(not t or _unresolved(t) for t in tags):
+                return {"status": "no_match", "steps": steps_log, "variables": variables,
+                        "final": None,
+                        "reason": "tag value could not be resolved from earlier steps"}
+            steps_log.append({"kind": "add_tag", "tags": tags})
+            return {"status": "ok", "steps": steps_log, "variables": variables,
+                    "final": {"type": "add_tag", "tags": tags}}
         else:
             return {"status": "error", "steps": steps_log, "variables": variables,
                     "final": None, "reason": f"unknown chain step kind '{kind}'"}
@@ -114,3 +141,15 @@ def test_run(recipe_id, test_contact_email):
     should — a live call, not a description of one."""
     recipe = schema.RECIPES[recipe_id]
     return run_chain(recipe, {"contact_email": test_contact_email})
+
+
+def test_run_plan(plan, test_contact_email):
+    """The dynamic-plan analogue of test_run(): plan is the raw custom_plan
+    dict a connector action carries (steps + terminal — see plan_validator.py),
+    already validated structurally (plan_validator.validate_plan) — not a
+    schema.RECIPES lookup, since a dynamically-composed plan has no id in
+    that table. Converts it to the {"app", "chain"} shape via
+    plan_validator.to_chain() and runs it through the exact same run_chain(),
+    because a validated plan and a hand-vetted recipe are the same shape by
+    construction once converted."""
+    return run_chain(plan_validator.to_chain(plan), {"contact_email": test_contact_email})
