@@ -9,6 +9,7 @@ import type {
   Condition,
   ConnectorTestRun,
   ConnectorTestRunStep,
+  NativeActionTestRun,
   RulePreview,
   Spec,
   TurnState,
@@ -192,6 +193,22 @@ function ActionLine({ a }: { a: Action }) {
     case "remove_from_sm":
       return <>remove from this shared inbox</>;
     case "connector": {
+      // native_action_id (v2.12, capability 5) is Hiver's own pre-built
+      // action block — no chain, no test_contact_email, just its two
+      // generic slots. Same "no vocabulary endpoint yet" fallback as the
+      // recipe id below: hardcode the one known id's display name.
+      if (a.native_action_id) {
+        const nativeLabel = a.native_action_id === "clickup_create_task"
+          ? "Create a ClickUp task"
+          : a.native_action_id;
+        return (
+          <>
+            run native action — {nativeLabel}, target{" "}
+            {need(a.target_name, "which list/board/channel?")}, titled{" "}
+            {need(a.title_hint, "what should it be titled?")}
+          </>
+        );
+      }
       // recipe is a raw id (engine/schema.py RECIPES key) — the engine has no
       // vocabulary endpoint for recipe display names yet (only trigger/
       // property labels, via /api/vocabulary), so this falls back to the id
@@ -222,12 +239,44 @@ function ActionLine({ a }: { a: Action }) {
 }
 
 /** Proof a connector rule does something real, before it's marked done: the
- *  engine already RAN the recipe's chain against the test contact email
- *  (engine/executor.py, via copilot.connector_test_run) — this renders that
- *  result, it doesn't trigger a call of its own. "no_match" (e.g. the test
- *  account has no CSM) is a clean, honest outcome, styled like the
- *  zero-match case in PreviewStrip below, not an error. */
-function TestRunStrip({ testRun }: { testRun: ConnectorTestRun }) {
+ *  engine already RAN the recipe's chain (or fired the native action)
+ *  against the test contact email — or, for a native action, with no test
+ *  contact at all (engine/executor.py, via copilot.connector_test_run) —
+ *  this renders that result, it doesn't trigger a call of its own.
+ *  "no_match" (e.g. the test account has no CSM) is a clean, honest outcome
+ *  for a chain-based result, styled like the zero-match case in
+ *  PreviewStrip below, not an error; a native action has no such outcome —
+ *  see NativeActionTestRunStrip. */
+function TestRunStrip({ testRun }: { testRun: ConnectorTestRun | NativeActionTestRun }) {
+  if ("result" in testRun) return <NativeActionTestRunStrip testRun={testRun} />;
+  return <ChainTestRunStrip testRun={testRun} />;
+}
+
+/** The native-action shape (capability 5) has no steps/final to expand —
+ *  it either ran or it didn't, so this is a single line, no "see steps". */
+function NativeActionTestRunStrip({ testRun }: { testRun: NativeActionTestRun }) {
+  if (testRun.status === "ok") {
+    const url = typeof testRun.result?.url === "string" ? testRun.result.url : null;
+    return (
+      <div className="border-b border-hairline px-5 py-2.5">
+        <span className="text-[12.5px] text-ink-soft">
+          <span className="font-medium text-ink">Test run: done</span>
+          {url ? <> — <span className="font-mono text-[12px]">{url}</span></> : null}.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="border-b border-hairline bg-destructive-soft px-5 py-2.5">
+      <span className="text-[12.5px] text-destructive">
+        <span className="font-semibold">Test run: couldn&apos;t complete</span>
+        {testRun.reason ? ` — ${testRun.reason}.` : "."}
+      </span>
+    </div>
+  );
+}
+
+function ChainTestRunStrip({ testRun }: { testRun: ConnectorTestRun }) {
   const [open, setOpen] = useState(false);
 
   if (testRun.status === "ok" && testRun.final)

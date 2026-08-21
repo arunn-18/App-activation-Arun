@@ -89,11 +89,19 @@ class Handler(BaseHTTPRequestHandler):
             recipes = {rid: {**r, "_blocked_on": connected_apps.prerequisites_met(
                              APPS_WS, app, r["prerequisites"])}
                       for rid, r in schema.RECIPES.items() if r["app"] == app}
+            # native actions (capability 5) — a genuinely separate listing from
+            # recipes: no chain, pre-built by Hiver. ClickUp only has this one,
+            # which is exactly why it needed its own key rather than being
+            # folded into track_b_recipes.
+            natives = {nid: {**n, "_blocked_on": connected_apps.prerequisites_met(
+                             APPS_WS, app, n["prerequisites"])}
+                      for nid, n in schema.NATIVE_ACTIONS.items() if n["app"] == app}
             return self._send(200, {
                 "app": app,
                 "connected": connected_apps.is_connected(APPS_WS, app),
                 "track_a_features": feats,
                 "track_b_recipes": recipes,
+                "native_actions": natives,
             })
         return self._send(404, {"error": "not found"})
 

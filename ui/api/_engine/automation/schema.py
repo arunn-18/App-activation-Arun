@@ -221,6 +221,41 @@ RECIPES = {
     },
 }
 
+# Native app-action automations (capability 5): Hiver's own PRE-BUILT action
+# block for a specific app operation — no query chain, no API composition,
+# just "fire this." Genuinely different from RECIPES/custom_plan above
+# (capability 6): those exist because there's NO native block for the use
+# case, so the engine composes Salesforce API calls itself; a native action
+# exists BECAUSE Hiver's product already built the integration, so this
+# registry just names it as legal automation vocabulary and says how to
+# call it.
+#
+# `op` + `args`: the mock/real service function to call and how to map ITS
+# param names to the connector action's own generic slots (target_name,
+# title_hint — see ACTIONS["connector"] below) — automation/executor.py's
+# run_native_action() is entirely data-driven off this, no per-action code.
+#
+# GENERIC: onboarding a native action for a NEW app is a data entry here
+# plus a small mock/real service module (clickup_mock.py is ClickUp's) —
+# the same "data entry + maybe a new mock service" cost RECIPES already
+# documented above.
+# SHAPED BY ONE EXAMPLE: target_name/title_hint are named generically
+# ("which list/board/channel", "what should it be called/about") because
+# that's what THIS ONE action needs. A future native action needing a THIRD
+# kind of slot has none yet — extend ACTIONS["connector"]'s params rather
+# than force it into these two.
+NATIVE_ACTIONS = {
+    "clickup_create_task": {
+        "app": "clickup",
+        "name": "Create a ClickUp task",
+        "description": ("Creates a task in a ClickUp list from this conversation — a "
+                        "native Hiver action block, not an API call this engine composes."),
+        "op": "create_task",
+        "args": {"list_name": "target_name", "title": "title_hint"},
+        "prerequisites": ["clickup_connected"],
+    },
+}
+
 # action type -> param spec.
 #   required:   must be non-empty before the rule is complete
 #   provenance: every value must literally appear in the user's own messages
@@ -275,17 +310,23 @@ ACTIONS = {
                              "question": "Which shared inbox should the conversation be added to?"}}},
     "remove_from_sm": {
         "params": {"inbox": {"required": False}}},
-    # Connector action: fires an app recipe's chain (see RECIPES above), OR —
-    # when nothing in RECIPES matches — a dynamically-composed `custom_plan`
-    # (automation/planner.py + plan_validator.py) built from the generic
-    # Salesforce object/field catalog (salesforce_schema.py). Exactly one of
-    # `recipe` / `custom_plan` is expected; that "which one, and is the one
-    # present actually valid" logic lives in automation/validator.py's
-    # dedicated connector block, NOT the generic required/enum loop below —
-    # `custom_plan` is a nested structure (steps + terminal), not a scalar
-    # the generic per-param machinery understands, so `recipe` is marked
-    # optional here on purpose (it's required only in the absence of a valid
-    # custom_plan; the connector block enforces that, not this dict).
+    # Connector action: "make this automation talk to another app," via
+    # exactly ONE of three mechanisms, in order of how much trust each one
+    # has already earned:
+    #   1. recipe — a hand-vetted RECIPES chain (fully tested, the fast path)
+    #   2. native_action_id — a pre-built Hiver action block for this app
+    #      (NATIVE_ACTIONS above, capability 5) — no chain, no API
+    #      composition, Hiver's product already built the integration
+    #   3. custom_plan — a dynamically-composed chain (automation/planner.py
+    #      + plan_validator.py, capability 6) when neither of the above
+    #      covers the ask
+    # Which one, and whether the one present is actually valid, lives
+    # entirely in automation/validator.py's dedicated connector block, NOT
+    # the generic required/enum loop below — custom_plan is a nested
+    # structure, not a scalar the generic per-param machinery understands,
+    # so `recipe`/target_name/title_hint are all marked optional here on
+    # purpose (each is required only for ITS OWN mechanism; the connector
+    # block enforces that per-mechanism requiredness, not this dict).
     #
     # test_contact_email is this recipe's ONE setup-time slot — a real contact
     # address to test-run the chain against before the rule is marked done
@@ -302,10 +343,26 @@ ACTIONS = {
                               "enum": list(RECIPES),
                               "enum_labels": {rid: r["name"] for rid, r in RECIPES.items()},
                               "question": "Which app automation should this run?"},
-                   "test_contact_email": {"required": True, "provenance": True,
+                   # required=False here too: a native action (native_action_id)
+                   # doesn't need a test contact at all — there's no CRM lookup
+                   # to prove, just target_name/title_hint. automation/
+                   # validator.py's connector block enforces this explicitly
+                   # for the recipe/custom_plan paths, which DO need it.
+                   "test_contact_email": {"required": False, "provenance": True,
                                           "question": "What's a real contact email address "
                                                       "I can use to test this end-to-end "
-                                                      "before it's marked done?"}}},
+                                                      "before it's marked done?"},
+                   # The native-action path's two generic slots (see
+                   # NATIVE_ACTIONS above for why they're named this
+                   # generically). required=False here too — only required
+                   # when native_action_id is actually set, enforced in
+                   # validator.py's connector block alongside the enum check.
+                   "target_name": {"required": False, "provenance": True,
+                                   "question": "Which ClickUp list should the task be "
+                                               "created in?"},
+                   "title_hint": {"required": False, "provenance": False,
+                                  "question": "What should the task's title be (e.g. the "
+                                              "conversation subject)?"}}},
 }
 
 # asks we recognize but don't build — name them, don't fake them
@@ -315,12 +372,16 @@ UNSUPPORTED = {
     "approval": "approval flows",
     "sla": "SLA policies (separate feature, not an automation)",
     # "connector" was removed from here in v2.8 — it is now a real, if
-    # narrow, ACTIONS entry (see RECIPES above). This entry covers every
-    # OTHER connector/integration ask, which still isn't buildable — named
-    # honestly instead of silently dropped, exactly like the rest of this
-    # dict. Do not fold recipe-matching asks in here.
-    "connector_other": ("connector automations other than the one currently supported "
-                        "recipe (Salesforce auto-assign to the account's CSM)"),
+    # narrow, ACTIONS entry (see RECIPES, NATIVE_ACTIONS above, and
+    # custom_plan in automation/extract.py). This entry covers every ask
+    # that fits NONE of those three mechanisms, which still isn't
+    # buildable — named honestly instead of silently dropped, exactly like
+    # the rest of this dict. Do not fold a recipe/native-action/plan match
+    # in here.
+    "connector_other": ("connector or app-action automations other than the ones "
+                        "currently supported (a hand-vetted Salesforce recipe, a "
+                        "native app action, or a Salesforce lookup this engine can "
+                        "compose on the fly)"),
 }
 
 # quantifiers that count as an explicit "run on everything" statement;

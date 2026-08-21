@@ -22,8 +22,10 @@ _OVERVIEW = (
     "conversation's current tags/assignee/status, day received, or an "
     "AI-extracted variable), then runs actions — tag or "
     "untag, assign (one person or round-robin), set status, add a note, send "
-    "a reply or notification, add to or remove from a shared inbox, or (one "
-    "recipe so far) run a connector automation. Ask about "
+    "a reply or notification, add to or remove from a shared inbox, or talk to "
+    "another app — a native action block (like creating a ClickUp task), a "
+    "ready-made Salesforce recipe, or a Salesforce lookup composed on the fly "
+    "for asks that fit the same shape. Ask about "
     "any of these and I'll go deeper."
 )
 
@@ -75,8 +77,12 @@ _TOPICS = [
      "the set."),
     (("integrat", "connector", "salesforce", "hubspot", "clickup", "custom field",
       "custom object", "approval", "sla", "webhook", "api"),
-     "One connector recipe is ready-made: " + next(iter(schema.RECIPES.values()))["name"]
-     + " — " + next(iter(schema.RECIPES.values()))["description"] + " Beyond that, I can "
+     "Three ways I can talk to another app, in order of how much is already built: "
+     "a native action block — " + ", ".join(f"{n['name']} ({n['app']})"
+                                            for n in schema.NATIVE_ACTIONS.values())
+     + " — is Hiver's own pre-built integration, no lookups involved. A ready-made "
+     "recipe — " + next(iter(schema.RECIPES.values()))["name"] + " — "
+     + next(iter(schema.RECIPES.values()))["description"] + " Beyond those, I can "
      "also compose a Salesforce lookup on the fly for other asks that fit the same shape "
      "— look up data about the sender's Account/Contact/Opportunity/Case, then assign or "
      "tag the conversation based on it (e.g. assign to the Account Owner instead of the "

@@ -44,10 +44,20 @@ export interface Action {
    *  the chain against before the rule is marked done. */
   recipe?: string | null;
   test_contact_email?: string | null;
+  /** A native app-action automation (v2.12, capability 5) — Hiver's own
+   *  pre-built action block (e.g. "Create a ClickUp task"), NOT an API call
+   *  this engine composes. target_name (which list/board/channel) and
+   *  title_hint (what it should be titled/about) are its two generic slots
+   *  (engine/schema.py's NATIVE_ACTIONS). Mutually exclusive with
+   *  `recipe`/`custom_plan` — exactly one of the three connector mechanisms
+   *  is ever set. */
+  native_action_id?: string | null;
+  target_name?: string | null;
+  title_hint?: string | null;
   /** A dynamically-composed connector plan (v2.11) — the OTHER way to fill a
-   *  connector action when no RECIPES entry matches: the engine composed its
-   *  own lookup chain from the Salesforce object/field catalog instead of
-   *  following a fixed recipe. Mutually exclusive with `recipe`. */
+   *  connector action when no RECIPES entry or native action matches: the
+   *  engine composed its own lookup chain from the Salesforce object/field
+   *  catalog instead of following a fixed recipe. */
   custom_plan?: ConnectorPlan | null;
   /** Derived, read-only: the recipe's or plan's own terminal chain step,
    *  surfaced generically so the draft/final JSON show what the connector
@@ -149,6 +159,17 @@ export interface ConnectorTestRun {
   reason?: string;
 }
 
+/** Result of firing a native app action for real (v2.12, capability 5) — the
+ *  native-action analogue of ConnectorTestRun above, for a mechanism with no
+ *  chain: it either ran or it didn't (no "no_match", no per-step log,
+ *  distinguished from ConnectorTestRun by having a `result` key instead of
+ *  `steps`/`final` — see engine/automation/executor.py's run_native_action). */
+export interface NativeActionTestRun {
+  status: "ok" | "error";
+  result: Record<string, unknown> | null;
+  reason?: string;
+}
+
 /** Track A result (engine/features.resolve_setup()): a multi-turn guided
  *  setup for an existing App feature — Authentication -> pick records ->
  *  pick fields per record (from a live "describe" call) -> enable for the
@@ -190,8 +211,10 @@ export interface TurnState {
   feature_request?: FeatureRequest | null;
   /** set only when the completed spec has a connector action — the real
    *  test-run result (engine/copilot.py connector_test_run), not present for
-   *  any other rule type. */
-  test_run?: ConnectorTestRun | null;
+   *  any other rule type. A native-action connector (capability 5) returns
+   *  NativeActionTestRun's shape instead — check for a `result` key to tell
+   *  them apart, same as copilot.py's own _render_test_run does. */
+  test_run?: ConnectorTestRun | NativeActionTestRun | null;
   /** schema-grounded answer when the user asked what the builder can do;
    *  the turn is read-only — the draft rule is unchanged */
   capability_answer?: string | null;

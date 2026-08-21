@@ -10,11 +10,15 @@ Prototype reads connected_apps.json; production would hit the apps/
 integrations service.
 
 GENERIC: load() / prerequisites_met() work for any app entry this fixture
-grows. SHAPED BY ONE EXAMPLE: only Salesforce is populated, and its two flags
-(salesforce_connected, account_team_enabled) are named for what THIS ONE
-recipe + Track A feature need — not a general taxonomy of what an app
-prerequisite could be. A prerequisite that needs a configured VALUE, not just
-a yes/no, doesn't fit this shape yet.
+grows — onboarding an app's auth is a data entry here (connected +
+api_version + whatever named prerequisite flags it needs), never a code
+change. SHAPED BY HAVING SEEN TWO EXAMPLES: Salesforce's two flags
+(salesforce_connected, account_team_enabled) are named for what its recipe +
+Track A features need; ClickUp's one flag (clickup_connected) is named for
+what its native create_task action (automation/schema.py's NATIVE_ACTIONS)
+needs — not a general taxonomy of what an app prerequisite could be. A
+prerequisite that needs a configured VALUE, not just a yes/no, doesn't fit
+this shape yet.
 
 api_version (see api_version() below) is a THIRD kind of per-app state,
 distinct from a prerequisite flag: not "is this satisfied yes/no" but "which
@@ -38,6 +42,7 @@ DEFAULT_PATH = Path(__file__).parent / "connected_apps.json"
 PREREQUISITE_LABELS = {
     "salesforce_connected": "the Salesforce app must be connected",
     "account_team_enabled": "Salesforce Account Team must be enabled with a CSM role",
+    "clickup_connected": "the ClickUp app must be connected",
 }
 
 # prerequisite flag -> the one-click fix, when the flag can be satisfied by a
@@ -47,6 +52,7 @@ PREREQUISITE_LABELS = {
 # assumed already configured on the Salesforce side).
 PREREQUISITE_ACTIONS = {
     "salesforce_connected": {"label": "Connect Salesforce", "phrase": "connect salesforce"},
+    "clickup_connected": {"label": "Connect ClickUp", "phrase": "connect clickup"},
 }
 
 

@@ -87,6 +87,10 @@ def _render_action(a):
     if t == "remove_from_sm":
         return "remove from this shared inbox"
     if t == "connector":
+        native = automation_schema.NATIVE_ACTIONS.get(a.get("native_action_id"))
+        if native:
+            return (f"run native action — {native['name']}, "
+                    f"target {need(a.get('target_name'))}, titled {need(a.get('title_hint'))}")
         recipe = automation_schema.RECIPES.get(a.get("recipe"))
         plan = a.get("custom_plan")
         if recipe:
@@ -193,13 +197,18 @@ def to_final_json(spec):
         elif t in ("add_to_sm", "remove_from_sm"):
             actions.append({"type": t, "inboxes": [a["inbox"]] if a.get("inbox") else []})
         elif t == "connector":
+            native = automation_schema.NATIVE_ACTIONS.get(a.get("native_action_id"))
             recipe = automation_schema.RECIPES.get(a.get("recipe"))
             plan = a.get("custom_plan")
             chain = (recipe.get("chain", []) if recipe
                     else automation_plan_validator.to_chain(plan)["chain"] if plan else [])
             terminal = _connector_terminal(chain)
             actions.append({
-                "type": "connector", "recipe": a.get("recipe"), "custom_plan": plan,
+                "type": "connector", "recipe": a.get("recipe"),
+                "native_action_id": a.get("native_action_id"),
+                "target_name": a.get("target_name") if native else None,
+                "title_hint": a.get("title_hint") if native else None,
+                "custom_plan": plan,
                 "test_contact_email": a.get("test_contact_email"),
                 "assigns_to": terminal["value"] if terminal and terminal["kind"] == "assign" else None,
                 "tags_with": terminal["value"] if terminal and terminal["kind"] == "add_tag" else None,
@@ -286,19 +295,27 @@ def _contributed_app_setup(spec, last_text):
 
 def connector_test_run(spec):
     """If the (complete) automation spec contains a connector action, fire
-    its recipe's chain — OR, for a dynamically-composed custom_plan
-    (automation/planner.py), the validated plan's own chain — for real via
-    automation/executor.py using the test_contact_email the admin supplied,
-    and return the result. This is the connector analogue of the draft ->
-    final step every other action type already goes through: those have no
-    external side effect to verify before being marked done, so they need
-    no such check; a connector rule calls a real service, so it does.
-    Returns None when the spec has no connector action (the common case).
-    A custom_plan action only ever reaches "complete" after validator.py
-    has already proven this exact test run succeeds, so this is a re-run
-    for display, not the first time it's been tried."""
+    it for real via automation/executor.py and return the result — the
+    connector analogue of the draft -> final step every other action type
+    already goes through: those have no external side effect to verify
+    before being marked done, so they need no such check; a connector rule
+    calls a real service, so it does. Returns None when the spec has no
+    connector action (the common case).
+
+    Three mechanisms, three executor entry points: a native action
+    (run_native_action) needs no test_contact_email at all — there's no
+    per-contact CRM lookup to prove, just its own target_name/title_hint,
+    already required before this spec could reach "complete". A recipe
+    (test_run) or custom_plan (test_run_plan) both need test_contact_email;
+    a custom_plan action only ever reaches "complete" after validator.py
+    has already proven this exact test run succeeds, so that case is a
+    re-run for display, not the first time it's been tried."""
     for a in spec.get("actions") or []:
-        if a.get("type") != "connector" or not a.get("test_contact_email"):
+        if a.get("type") != "connector":
+            continue
+        if a.get("native_action_id"):
+            return automation_executor.run_native_action(a["native_action_id"], a)
+        if not a.get("test_contact_email"):
             continue
         if a.get("recipe"):
             return automation_executor.test_run(a["recipe"], a["test_contact_email"])
@@ -473,8 +490,21 @@ def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
 def _render_test_run(test_run):
     if test_run is None:
         return None
+    if "result" in test_run:
+        # native-action shape (executor.run_native_action) — no "final" key,
+        # no "no_match" outcome: it either ran or it didn't.
+        if test_run["status"] == "ok":
+            url = (test_run.get("result") or {}).get("url")
+            return f"Test run: done — {url}." if url else "Test run: done."
+        return f"Test run: couldn't complete — {test_run.get('reason', 'unknown error')}."
+    # recipe/custom_plan shape (executor.run_chain) — terminal is assign OR
+    # add_tag (see automation/executor.py's run_chain "final" kinds), so this
+    # reads whichever one actually ran instead of assuming assign.
     if test_run["status"] == "ok":
-        return f"Test run: assigned to {test_run['final']['target']}."
+        final = test_run.get("final") or {}
+        if final.get("type") == "add_tag":
+            return f"Test run: tagged with {', '.join(final.get('tags') or [])}."
+        return f"Test run: assigned to {final.get('target')}."
     if test_run["status"] == "no_match":
         return f"Test run: nothing was assigned — {test_run['reason']}."
     return f"Test run: couldn't complete — {test_run.get('reason', 'unknown error')}."

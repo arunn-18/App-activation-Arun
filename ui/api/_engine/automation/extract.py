@@ -42,6 +42,11 @@ def _vocab_block():
                  "it sounds):")
     for rid, r in schema.RECIPES.items():
         lines.append(f"  {rid} ({r['app']}) — {r['description']}")
+    lines.append("NATIVE APP ACTIONS (legal values for the 'connector' action's "
+                 "`native_action_id` param — a pre-built Hiver action block, not an API "
+                 "call this engine composes; this is the COMPLETE list):")
+    for nid, n in schema.NATIVE_ACTIONS.items():
+        lines.append(f"  {nid} ({n['app']}) — {n['description']}")
     lines.append("SALESFORCE OBJECTS available for a connector's custom_plan (see rule 19b) — "
                  "call describe_object on one before referencing its fields, never guess a "
                  "field name: " + ", ".join(sorted(salesforce_schema.OBJECTS)))
@@ -182,21 +187,35 @@ EXTRACTION RULES:
    description says (assigning/routing conversations to a Salesforce
    Account's CSM). Do not get creative because little else is defined: a
    request for a DIFFERENT Salesforce action this recipe doesn't cover (see
-   rule 19b before giving up on it) is not this recipe; a request for a
-   NON-Salesforce integration (HubSpot, ClickUp, a generic "call our API", a
-   webhook) is NOT buildable at all here — add "connector_other" reasoning to
-   unsupported_requests for those (never invent a fake recipe id, never leave
-   `recipe` null hoping the code will ask — with one recipe there is nothing
-   to ask, only a match or a clean escalation). test_contact_email is filled
-   ONLY from an email address the user actually wrote, exactly like any other
-   provenance-guarded value (rule 1).
+   rule 19b before giving up on it) is not this recipe; a request matching a
+   NATIVE APP ACTION instead (rule 19a) is not this recipe either.
+   test_contact_email is filled ONLY from an email address the user actually
+   wrote, exactly like any other provenance-guarded value (rule 1).
+19a. Native app actions: the 'connector' action's `native_action_id` param is
+   legal ONLY as one of the NATIVE APP ACTIONS ids listed above — match it
+   when the request wants EXACTLY what that action's description says
+   ("create a ClickUp task from this conversation" -> clickup_create_task).
+   Check this BEFORE attempting a custom_plan (rule 19b): a native action is
+   Hiver's own pre-built block, simpler and more certain than composing API
+   calls, so prefer it whenever one actually matches. target_name (which
+   list/board/channel — provenance-guarded, rule 1) and title_hint (what the
+   created item should be titled/about — free text, not provenance-guarded,
+   same as add_note's content) are its own two slots; leave either null if
+   the user hasn't said it yet. recipe/native_action_id/custom_plan are all
+   mutually exclusive — never fill more than one on the same action. A
+   request for a NON-Salesforce, non-native-action integration (a generic
+   "call our API" against an app with no NATIVE APP ACTIONS entry, a
+   webhook) is NOT buildable at all — add "connector_other" reasoning to
+   unsupported_requests for those (never invent a fake id, never leave
+   every connector field null hoping the code will ask — with this little
+   vocabulary there is nothing to ask, only a match or a clean escalation).
 19b. Dynamic connector plans (custom_plan): when a Salesforce-connector-shaped
-   ask does NOT match the one CONNECTOR RECIPES entry, but IS a "look up some
-   Salesforce data about this account/contact, then assign or tag the
-   conversation based on it" request (e.g. "assign new conversations to the
-   Account Owner instead of the CSM", "tag it with the Case's priority when
-   there's an open case"), attempt to compose a custom_plan INSTEAD of
-   escalating to unsupported_requests:
+   ask does NOT match the one CONNECTOR RECIPES entry or any NATIVE APP
+   ACTION, but IS a "look up some Salesforce data about this account/contact,
+   then assign or tag the conversation based on it" request (e.g. "assign new
+   conversations to the Account Owner instead of the CSM", "tag it with the
+   Case's priority when there's an open case"), attempt to compose a
+   custom_plan INSTEAD of escalating to unsupported_requests:
    - Call describe_object (and list_objects if you need to see what exists
      first) to learn REAL field names before writing a step — never guess one.
    - steps: an ORDERED list of {{object, where, extract_variables}} lookups,
@@ -217,8 +236,8 @@ EXTRACTION RULES:
      null and use "connector_other" in unsupported_requests instead, exactly
      like rule 19's clean escalation. A wrong plan that merely LOOKS
      plausible is far worse than an honestly declared gap.
-   - recipe and custom_plan are mutually exclusive: never fill both on the
-     same action.
+   - recipe, native_action_id, and custom_plan are mutually exclusive: never
+     fill more than one on the same action.
 """
 
 RESPONSE_SCHEMA = {
@@ -265,9 +284,18 @@ RESPONSE_SCHEMA = {
                         "recipe": {"type": ["string", "null"],
                                   "enum": list(schema.RECIPES) + [None]},
                         "test_contact_email": {"type": ["string", "null"]},
+                        # Native app action (rule 19a) — Hiver's own pre-built
+                        # action block, the mechanism to prefer over custom_plan
+                        # when one actually matches. target_name/title_hint are
+                        # its two generic slots (see NATIVE_ACTIONS' own comment
+                        # in schema.py for why they're named this generically).
+                        "native_action_id": {"type": ["string", "null"],
+                                            "enum": list(schema.NATIVE_ACTIONS) + [None]},
+                        "target_name": {"type": ["string", "null"]},
+                        "title_hint": {"type": ["string", "null"]},
                         # A dynamically-composed connector plan (rule 19b) — the
                         # OTHER way to fill a connector action when no RECIPES
-                        # entry matches. extract_variables is an array of
+                        # entry or native action matches. extract_variables is an array of
                         # {variable, field} pairs, not a {name: field} map:
                         # strict-mode JSON schema can't express an
                         # arbitrary-key object, only fixed-shape ones (see
@@ -331,7 +359,8 @@ RESPONSE_SCHEMA = {
                     "required": ["type", "tags", "target", "targets", "status_value",
                                  "distribution", "content", "pinned",
                                  "email_enabled", "inbox", "body_hint",
-                                 "recipe", "test_contact_email", "custom_plan"],
+                                 "recipe", "test_contact_email", "native_action_id",
+                                 "target_name", "title_hint", "custom_plan"],
                 },
             },
             "ai_extract": {

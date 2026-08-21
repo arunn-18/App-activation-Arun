@@ -21,23 +21,29 @@ exception, never a half-run side effect. An `assign` step is terminal: it
 reports what WOULD be assigned; it does not mutate Hiver (this stays a
 test-run capture, like preview.py's dry-run of a final rule).
 
-MOCK_SERVICES only knows Salesforce; the chain runner understands
-api_call/assign/add_tag steps. A hand-vetted RECIPES entry only ever uses
-one named op per api_call step; a dynamically-composed plan (see
-automation/planner.py, plan_validator.py) uses the SAME api_call/extract_
-variables shape but calls the generic salesforce_mock.query() op with a
-structured {"object", "where", "fields"} arg instead of a literal one —
-run_chain() itself doesn't know or care which kind of chain it's running,
-which is exactly why the dynamic path needed no executor changes beyond
-_fill()/_unresolved() learning to recurse into that structured arg.
+MOCK_SERVICES maps app -> the module that implements its ops — run_chain()
+walks recipe["chain"]/a converted plan's steps against whichever app that
+chain names; run_native_action() below reuses the SAME dict for a native
+action's ONE op call, since both are really "which module speaks for this
+app." A hand-vetted RECIPES entry only ever uses one named op per api_call
+step; a dynamically-composed plan (see automation/planner.py,
+plan_validator.py) uses the SAME api_call/extract_variables shape but calls
+the generic salesforce_mock.query() op with a structured {"object", "where",
+"fields"} arg instead of a literal one — run_chain() itself doesn't know or
+care which kind of chain it's running, which is exactly why the dynamic
+path needed no executor changes beyond _fill()/_unresolved() learning to
+recurse into that structured arg. Onboarding app #2's native action
+(ClickUp) needed one line here (clickup_mock added to MOCK_SERVICES) — see
+run_native_action()'s own docstring for why it needed no other changes.
 """
 import re
 
+import clickup_mock
 import salesforce_mock
 from . import plan_validator
 from . import schema
 
-MOCK_SERVICES = {"salesforce": salesforce_mock}
+MOCK_SERVICES = {"salesforce": salesforce_mock, "clickup": clickup_mock}
 
 _VAR_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
@@ -141,6 +147,40 @@ def test_run(recipe_id, test_contact_email):
     should — a live call, not a description of one."""
     recipe = schema.RECIPES[recipe_id]
     return run_chain(recipe, {"contact_email": test_contact_email})
+
+
+def run_native_action(action_id, connector_action):
+    """Fires ONE native action (capability 5, schema.NATIVE_ACTIONS) for
+    real, against its app's mock/real service — the native-action analogue
+    of run_chain(), for a mechanism that has no chain at all, just one call.
+    connector_action: the connector action dict as extracted (target_name/
+    title_hint live on it directly — see ACTIONS["connector"]'s params).
+
+    GENERIC (holds for native action #2+): entirely data-driven off
+    NATIVE_ACTIONS[action_id]["op"]/["args"] — no per-action code here.
+    args maps the mock function's OWN param names to the connector action's
+    generic slots, so onboarding a new native action never touches this
+    function, only schema.py's data and a service module.
+
+    Returns {"status": "ok" | "error", "result": {...} | None, "reason"?:
+    str} — no "no_match" here, unlike run_chain(): a native action either
+    fires with what it's given or the app/op is missing; there is no lookup
+    step that can come back empty."""
+    action = schema.NATIVE_ACTIONS.get(action_id)
+    if action is None:
+        return {"status": "error", "result": None,
+                "reason": f"unknown native action '{action_id}'"}
+    service = MOCK_SERVICES.get(action["app"])
+    if service is None:
+        return {"status": "error", "result": None,
+                "reason": f"no service wired for app '{action['app']}'"}
+    op = getattr(service, action["op"], None)
+    if op is None:
+        return {"status": "error", "result": None,
+                "reason": f"unknown op '{action['op']}' for app '{action['app']}'"}
+    call_args = {fn_param: connector_action.get(slot)
+                for fn_param, slot in action["args"].items()}
+    return {"status": "ok", "result": op(**call_args)}
 
 
 def test_run_plan(plan, test_contact_email):
