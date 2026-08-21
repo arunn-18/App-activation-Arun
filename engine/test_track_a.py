@@ -38,6 +38,7 @@ from apps import schema
 from apps import setup as features
 
 FEATURE_ID = "salesforce_account_contact_details"
+WRITE_FEATURE_ID = "salesforce_create_contact"
 
 
 def _disconnected_ws():
@@ -152,6 +153,47 @@ def run():
           r8["feature"]["objects"] == ["Account"]
           and r8["feature"]["fields_by_object"]["Account"] == ["Account Name", "Account Owner"]
           and r8["feature"]["inboxes"] == ["Support", "Billing"])
+
+    # ---- capability 4: write-usecase field config (salesforce_create_contact) -
+    # a genuinely separate branch from the view feature above — proves it by
+    # reading a DIFFERENT catalog (WRITABLE_FIELD_CATALOG excludes Contact
+    # Email; nothing here reuses view-usecase wording or data).
+    write_r1 = features.resolve_setup(WRITE_FEATURE_ID, _setup(), connected)
+    check("write feature, no objects yet -> asks which record to CREATE (not 'show')",
+          write_r1["status"] == "needs_info"
+          and "create" in write_r1["questions"][0].lower()
+          and "show" not in write_r1["questions"][0].lower())
+
+    write_r2 = features.resolve_setup(
+        WRITE_FEATURE_ID, _setup(objects=["Contact"]), connected)
+    check("write feature asks 'fill in when creating one', not 'show'",
+          write_r2["status"] == "needs_info"
+          and "fill in when creating one" in write_r2["questions"][0])
+    write_offered = {o["value"] for o in write_r2["questions_structured"][0]["options"]}
+    check("write field options come from WRITABLE_FIELD_CATALOG, not FIELD_CATALOG "
+          "(Contact Email is viewable but not writable, so it's absent here)",
+          write_offered == {"Contact Name", "Contact Phone", "Contact Role",
+                            "Preferred Language"}
+          and "Contact Email" not in write_offered)
+
+    write_r3 = features.resolve_setup(
+        WRITE_FEATURE_ID,
+        _setup(objects=["Contact"], contact_fields=["Contact Name", "Contact Phone"]),
+        connected)
+    check("write feature reaches the SAME shared inbox-enable step as the view feature",
+          write_r3["status"] == "needs_info"
+          and write_r3["questions_structured"][0]["slot"] == "feature_setup.inboxes")
+
+    write_r4 = features.resolve_setup(
+        WRITE_FEATURE_ID,
+        _setup(objects=["Contact"], contact_fields=["Contact Name", "Contact Phone"],
+               inboxes=["Support"]),
+        connected)
+    check("write feature completes with its own fields/inboxes",
+          write_r4["status"] == "complete"
+          and write_r4["feature"]["fields_by_object"]["Contact"]
+              == ["Contact Name", "Contact Phone"]
+          and write_r4["feature"]["inboxes"] == ["Support"])
 
     # ---- edge cases -----------------------------------------------------------
     unknown = features.resolve_setup("not_a_real_feature", _setup(), connected)

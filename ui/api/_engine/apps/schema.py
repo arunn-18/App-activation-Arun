@@ -11,22 +11,27 @@ schema" bug this split fixes. router.py decides which schema/extractor a
 turn even needs BEFORE either one is loaded.
 
 GENERIC: the FEATURES dict shape (id -> app/name/description/prerequisites/
-object_choices) generalizes to any future app/feature — see apps/setup.py's
-resolve_setup() for the step order that walks them. FIELD_CATALOG /
-WRITABLE_FIELD_CATALOG are DERIVED from app_catalog.py, the one shared
-per-app object/field catalog Track B's planner also reads — not owned or
-duplicated here; see app_catalog.py's own docstring for why.
+object_choices/kind) generalizes to any future app/feature — see
+apps/setup.py's resolve_setup() for the step order that walks them.
+FIELD_CATALOG / WRITABLE_FIELD_CATALOG are DERIVED from app_catalog.py, the
+one shared per-app object/field catalog Track B's planner also reads — not
+owned or duplicated here; see app_catalog.py's own docstring for why.
 
-SHAPED BY HAVING SEEN TWO REAL USE CASES (per the 2026-08-18 product spec,
+`kind`: "view" (default — read-only Field config, apps/setup.py's existing
+step 3) or "write" (capability 4 — Field config for creating a NEW record,
+reading WRITABLE_FIELD_CATALOG instead of FIELD_CATALOG, a genuinely
+separate branch in resolve_setup() that the view kind's steps never touch).
+
+SHAPED BY HAVING SEEN THREE REAL USE CASES (per the 2026-08-18 product spec,
 "Apps Activation Steps: Usecase-wise steps" — a CSV listing every Salesforce
-use case and its setup steps): only ONE feature is built
-(salesforce_account_contact_details), covering the first CRM use case
-("Viewing account & contact details"). The second use case in the same spec
+use case and its setup steps): two features are built —
+salesforce_account_contact_details ("Viewing account & contact details")
+and salesforce_create_contact ("Managing CRM Records from Hiver"'s
+create-a-Contact slice, kind="write"). The THIRD use case in the same spec
 ("Smart routing to right owner / auto-assignment") is Track B — it's an
 automation with a trigger, so it lives in automation/schema.py's RECIPES,
-not here. The OTHER use cases in the same spec (Managing CRM Records from
-Hiver; Syncing Hiver conversations with SF records) are explicitly NOT
-built — they need Field config - Write, Prefill fields, and Sync steps this
+not here. Prefill fields and Syncing Hiver conversations with SF records
+(also in the same spec) are explicitly NOT built — they need steps this
 module doesn't implement; don't stretch FEATURES to fake them.
 """
 import app_catalog
@@ -34,11 +39,21 @@ import app_catalog
 FEATURES = {
     "salesforce_account_contact_details": {
         "app": "salesforce",
+        "kind": "view",
         "name": "View account & contact details",
         "description": ("Show the sender's Salesforce Account and Contact details "
                         "(company, owner, CSM, open cases) alongside the conversation."),
         "prerequisites": ["salesforce_connected"],
         "object_choices": ["Account", "Contact"],
+    },
+    "salesforce_create_contact": {
+        "app": "salesforce",
+        "kind": "write",
+        "name": "Create a Contact from Hiver",
+        "description": ("Let agents create a new Salesforce Contact directly from a "
+                        "conversation, filling in the fields you choose here."),
+        "prerequisites": ["salesforce_connected"],
+        "object_choices": ["Contact"],
     },
 }
 

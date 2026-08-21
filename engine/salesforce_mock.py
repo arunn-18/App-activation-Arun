@@ -103,6 +103,21 @@ def describe_fields(object_name):
     return {"success": True, "object": object_name, "fields": fields}
 
 
+def describe_writable_fields(object_name):
+    """Capability 4's analogue of describe_fields() above: which fields an
+    admin can offer agents to FILL IN when creating a new record of this
+    object (Track A's write-usecase step), not which fields to display.
+    Reads apps.schema.WRITABLE_FIELD_CATALOG — a real describe API would
+    tell you this from each field's `createable` flag; the mock's
+    equivalent is app_catalog.py's per-field `write` flag."""
+    catalog = apps_schema.WRITABLE_FIELD_CATALOG.get(object_name)
+    if catalog is None:
+        return {"success": False, "object": object_name, "fields": []}
+    fields = ([{"name": f, "kind": "standard"} for f in catalog["standard"]]
+             + [{"name": f, "kind": "custom"} for f in catalog["custom"]])
+    return {"success": True, "object": object_name, "fields": fields}
+
+
 # ------------------------------------------------------------- generic ops
 # The primitives automation/planner.py's dynamically-composed connector
 # plans run on, and the tools it explores the schema with before proposing
