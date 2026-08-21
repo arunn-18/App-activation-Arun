@@ -17,6 +17,7 @@ import json
 import docent
 import router
 from apps import extract as apps_extract
+from apps import schema as apps_schema
 from apps import setup as apps_setup
 from automation import executor as automation_executor
 from automation import extract as automation_extract
@@ -392,6 +393,55 @@ def render_feature(feature_result):
     return "\n".join(lines)
 
 
+def _mapping_explanation(spec, feature_result):
+    """The requested conversational step this codebase didn't have yet:
+    identify the usecase, map it to the catalog, and SAY the mapping out
+    loud before diving into setup questions — "you want X, I can do that
+    via Y, here's how" — rather than jumping straight to "which records
+    should this show?" with no explanation of why. Composed ENTIRELY from
+    the matched capability's own name/description (never invented), the
+    same "answer only from schema.py" discipline docent.py's capability
+    answers already follow — this only differs from those in WHEN it
+    fires (once, unprompted, on the turn a capability is first identified)
+    rather than in response to an explicit "what can you do" question.
+
+    Only ONE turn ever gets this line — see _turn()'s is_first_turn gate —
+    so a multi-turn setup conversation doesn't re-explain itself on every
+    answer. SHAPED BY ONE EXAMPLE: gated on "first turn of the whole
+    conversation" because that's when a usecase is normally first stated;
+    a capability that only becomes identifiable on turn 2+ (the user was
+    vague at first) won't get this sentence — the existing intent_summary
+    framing still covers "here's what I understood" for that case, just
+    without the explicit "and here's the capability that solves it" tie-in.
+    Returns None when nothing has been matched yet (nothing to explain)."""
+    if feature_result is not None:
+        f = apps_schema.FEATURES.get(feature_result.get("feature_id"))
+        if f is None:
+            return None
+        return (f"This looks like a fit for **{f['name']}** (an existing Salesforce "
+                f"app capability) — {f['description']} Let's get it set up.")
+    for a in spec.get("actions") or []:
+        if a.get("type") != "connector":
+            continue
+        if a.get("native_action_id"):
+            n = automation_schema.NATIVE_ACTIONS.get(a["native_action_id"])
+            if n:
+                return (f"This looks like a fit for **{n['name']}** (a native "
+                        f"{n['app'].title()} action, not an API call this engine "
+                        f"composes) — {n['description']} Let's get it set up.")
+        if a.get("recipe"):
+            r = automation_schema.RECIPES.get(a["recipe"])
+            if r:
+                return (f"This looks like a fit for **{r['name']}** (a ready-made "
+                        f"automation recipe) — {r['description']} Let's get it set up.")
+        if a.get("custom_plan"):
+            summary = a["custom_plan"].get("plan_summary")
+            return ("This looks like it needs a composed Salesforce lookup, since "
+                    "there's no ready-made action for it" + (f" — {summary}" if summary else "")
+                    + ". Let's get it set up.")
+    return None
+
+
 def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
     """Shared per-turn pipeline: router decides the track, then that track's
     OWN extract -> resolve pipeline runs. Returns (spec, result) where
@@ -404,6 +454,11 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
     route = router.classify(client, messages, model)
     last_user = next((m["content"] for m in reversed(messages)
                       if m["role"] == "user"), "")
+    # the mapping explanation (see _mapping_explanation) only ever fires on
+    # the conversation's first turn — an assistant message already in
+    # history means a capability was either already explained or is still
+    # being narrowed down, either way not worth re-explaining.
+    is_first_turn = not any(m["role"] == "assistant" for m in messages)
 
     if route["track"] == "app_setup":
         if on_event:
@@ -439,6 +494,9 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
         if spec.get("closing") and _contributed(spec, last_user):
             spec["closing"] = False
 
+    spec["mapping_explanation"] = (
+        _mapping_explanation(spec, result.get("feature_request")) if is_first_turn else None)
+
     # capability questions: the model only classifies (router.py); the answer
     # is composed in code from schema.py so nothing unbuildable is ever
     # taught. A question is never a closing.
@@ -467,6 +525,7 @@ def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
         "capability_answer": (docent.answer(spec["capability_question"])
                               if spec.get("capability_question") else None),
         "no_intent": spec.get("no_intent") or None,
+        "mapping_explanation": spec.get("mapping_explanation"),
         "closing": bool(spec.get("closing")),
         "done": bool(spec.get("closing")) and complete,
         "intent_summary": spec.get("intent_summary") or "",
@@ -518,6 +577,11 @@ def respond(client, messages, model=None, ws=None, apps_ws=None):
                         apps_ws=apps_ws)
 
     feature_result = result.get("feature_request")
+    # the mapping explanation (see _mapping_explanation) — the "identify the
+    # usecase, map it to the catalog, and SAY so before diving into setup
+    # questions" step — leads whichever branch below actually runs, Track A
+    # or B alike, since both are equally "a capability was just matched."
+    mapping = spec.get("mapping_explanation")
     if feature_result is not None:
         # Track A: a completely different shape from an automation turn —
         # no WHEN/IF/THEN, no closing logic below (all of which assume a
@@ -526,9 +590,10 @@ def respond(client, messages, model=None, ws=None, apps_ws=None):
         # known state, then what's next" way as the automation path.
         if feature_result["status"] == "complete":
             feat = feature_result["feature"]
-            return (f"{feat['name']} is set up — {feat['description']}\n\n"
+            lead = f"{mapping}\n\n" if mapping else ""
+            return (lead + f"{feat['name']} is set up — {feat['description']}\n\n"
                     + render_feature(feature_result))
-        parts = [render_feature(feature_result)]
+        parts = ([mapping] if mapping else []) + [render_feature(feature_result)]
         if feature_result["status"] == "invalid":
             parts.append("This isn't usable yet in this workspace: "
                          + "; ".join(feature_result.get("errors", [])) + ".")
@@ -548,7 +613,7 @@ def respond(client, messages, model=None, ws=None, apps_ws=None):
 
     closing = bool(spec.get("closing"))
 
-    parts = []
+    parts = [mapping] if mapping else []
     if spec.get("no_intent"):
         parts.append(
             "I couldn't find an automation in that. Tell me what should happen "

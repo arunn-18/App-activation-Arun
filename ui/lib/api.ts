@@ -224,6 +224,13 @@ export interface TurnState {
   /** the message carried no automation content (gibberish, small talk) — the
    *  turn is read-only and no rule card is worth showing */
   no_intent?: string | null;
+  /** "you want X, I can do that via Y — here's how" — set ONLY on the turn a
+   *  capability (Track A feature, or a Track B recipe/native action/composed
+   *  plan) is first matched, composed entirely from that capability's own
+   *  name/description (engine/copilot.py's _mapping_explanation). null on
+   *  every later turn of the same conversation and whenever nothing has
+   *  been matched yet. */
+  mapping_explanation?: string | null;
   /** the latest user message was a wrap-up ("that's about it"), no new content */
   closing: boolean;
   /** closing AND the rule is complete: conversation is finished */
@@ -402,6 +409,11 @@ export function hasFeatureCard(t: TurnState): boolean {
 export function assistantText(t: TurnState, lead = false): string {
   const parts: string[] = [];
   const intro = lead && t.intent_summary ? t.intent_summary : "";
+  // "you want X, I can do that via Y — here's how": set only on the turn a
+  // capability is first matched (engine-side gated, not re-derived here) —
+  // leads whichever branch below actually runs, Track A or B alike.
+  const mapping = t.mapping_explanation ?? "";
+  const withMapping = (line: string) => (mapping ? `${mapping}\n\n${line}` : line);
   if (t.track === "feature" && t.feature_request) {
     // Track A: a completely different shape from an automation turn — no
     // WHEN/IF/THEN. The FeatureCard renders the running setup progress;
@@ -409,13 +421,14 @@ export function assistantText(t: TurnState, lead = false): string {
     // the questionnaire below carries the actual answer options.
     const fr = t.feature_request;
     if (fr.status === "complete" && fr.feature)
-      return `${fr.feature.name} is set up — review it below.`;
+      return withMapping(`${fr.feature.name} is set up — review it below.`);
     if (fr.status === "invalid")
-      return "This isn't usable yet: " + fr.errors.join("; ") + ".";
-    return fr.questions.length
+      return withMapping("This isn't usable yet: " + fr.errors.join("; ") + ".");
+    return withMapping(fr.questions.length
       ? `To finish setting this up: ${fr.questions[0]}`
-      : "Setting this up — see below.";
+      : "Setting this up — see below.");
   }
+  if (mapping) parts.push(mapping);
   if (t.no_intent) {
     // nothing to build from — say so instead of rendering a hollow draft
     parts.push(
