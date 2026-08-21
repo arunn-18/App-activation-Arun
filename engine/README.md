@@ -550,6 +550,96 @@ this sandbox (no `OPENAI_API_KEY`) — everything downstream of "the model
 proposed this plan" is. No regressions: validator 56/56 core + 58/58 units,
 connector 27/27, track A 29/29.
 
+## Onboard-any-app foundation: unified catalog, capabilities 4/5/7, mapping explanation (v2.12, 2026-08-21)
+
+The ask: build the base so a NEW Marketplace app onboards with config
+changes, not engine code — defining its auth, its capabilities, and its
+API surface — and cover the full requested conversational flow: identify
+the usecase, map it to the catalog, SAY the mapping out loud, decide
+Track A/B/not-possible, help with setup, and offer to test on a real
+conversation. Six numbered capabilities were named explicitly: (1) auth,
+(2) record-level config, (3) field config for viewing, (4) field config
+for writing, (5) native app-action automations, (6) API-composed
+automations (already built in v2.11). This pass adds 4, 5, 7 (the
+mapping-explanation step), and the foundation that makes onboarding app #2
+genuinely config-only.
+
+**`app_catalog.py` (new, top-level, shared) — the unification.** Before
+this, the same kind of information was described TWICE with no shared
+source: `apps/schema.py`'s `FIELD_CATALOG` (display names, for Track A's
+view picker) and `salesforce_schema.py`'s `OBJECTS` (API names +
+assignable/taggable flags, for Track B's planner). Onboarding app #2 would
+have meant writing both shapes by hand for it. Now one file describes each
+field once, with explicit flags (`view`/`write`/`custom`/`assignable`/
+`taggable` — never inferred from type alone), and both `FIELD_CATALOG` and
+the new `WRITABLE_FIELD_CATALOG` derive from it (`field_catalog()`/
+`writable_field_catalog()`), as does `salesforce_schema.OBJECTS`
+(`api_objects()`). Verified byte-for-byte identical to the old hardcoded
+values (same labels, same order, same assignable/taggable sets) — zero
+behavior change to the existing Track A flow, the one non-negotiable
+guardrail on this whole pass.
+
+**Capability 4 — write-usecase field config** (`salesforce_create_contact`,
+"Managing CRM Records from Hiver"'s create-a-Contact slice): a Track A
+feature now carries `kind: "view"` (default) or `"write"`.
+`apps/setup.py`'s field-config step branches on it — a write-kind feature
+reads `WRITABLE_FIELD_CATALOG` via its own `describe_writable_fields()`
+mock call, with its own question wording ("fill in when creating one" /
+"create" vs "show"). A genuinely separate branch, not a parameter tweak —
+every existing Track A test still passes unchanged, plus 5 new ones
+proving the write branch is real (e.g. Contact Email is viewable but not
+writable, so it's absent from the write picker).
+
+**Capability 5 — native app-action automations** (`clickup_create_task`):
+a connector action now has THREE mutually-exclusive mechanisms, in order
+of trust already earned — a hand-vetted `RECIPES` chain, a native action
+block (new), or a dynamically-composed `custom_plan`. Native actions are
+Hiver's own pre-built integration (no chain, no API composition — "fire
+this"). `automation/schema.py`'s `NATIVE_ACTIONS` registry is entirely
+data-driven (`op` + `args` mapping the service's own param names to the
+connector's two generic slots, `target_name`/`title_hint`);
+`executor.run_native_action()` needs no per-action code.
+**`clickup_mock.py` is the SECOND real app in this engine** — proving
+capability 5 generalizes past Salesforce, not asserting it in comments.
+Onboarding it needed one `connected_apps.json` entry, one `NATIVE_ACTIONS`
+entry, and this one small mock module — no engine code changed. Along the
+way, fixed a real pre-existing bug: `_render_test_run` crashed (KeyError)
+on an `add_tag`-terminal result (the v2.11 "tag by Case priority" plan),
+since it unconditionally read `.final.target`.
+
+**Capability 7 — test on a real conversation.** Instead of asking an admin
+to type an arbitrary test email, `mailbox_lookup.py` offers REAL
+conversations from the demo mailbox whose sender is a known Salesforce
+contact. Track B's `test_contact_email` question is now a CHOICE of real
+conversations with a free-text fallback (same slot, same requiredness,
+only the presentation changed). Track A gets a genuinely new courtesy —
+`apps/setup.py`'s `preview_feature()` actually queries the mock for a named
+real contact and shows the REAL field values, never a placeholder; never
+blocks completeness, and explicitly skipped for write-kind features (there's
+no existing record to preview yet). Surfaced this fixed a real honesty gap:
+Track A's catalog always listed Contact Name/Phone/Role as viewable, but
+the fixture had no such data — now every fixture contact has real values.
+
+**The usecase-to-capability mapping explanation** (the missing conversational
+step): `copilot._mapping_explanation()` composes ONE sentence — "you want X,
+I can do that via Y, here's how" — entirely from the matched capability's
+own name/description, the same "answer only from schema.py" discipline
+`docent.py`'s capability answers already follow. Fires exactly once per
+conversation (`_turn()`'s `is_first_turn` gate: no assistant message in
+history yet), covering all three Track B mechanisms and Track A features;
+silent when nothing has matched, leaving the existing unmappable/unsupported
+escalation to carry the "not possible" case.
+
+**Testing:** three new suites (`test_native_action.py` 10, `test_mapping_
+explanation.py` 7, `test_real_conversation.py` 12), all pure code, no LLM —
+same reasoning as every other capability suite here: which capability a
+live model picks isn't verifiable in this sandbox; everything downstream
+of "the model matched this" is. No regressions across the full run:
+validator 56/56 core + 58/58 units, connector 27/27, track A 34/34,
+connector planner 18/18. `ui/` (FeatureCard.tsx, RuleCard.tsx, lib/api.ts)
+updated for every new field on both wire contracts and typechecks clean
+(`npx tsc --noEmit`).
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session
