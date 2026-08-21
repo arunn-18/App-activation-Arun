@@ -16,6 +16,14 @@ recipe + Track A feature need — not a general taxonomy of what an app
 prerequisite could be. A prerequisite that needs a configured VALUE, not just
 a yes/no, doesn't fit this shape yet.
 
+api_version (see api_version() below) is a THIRD kind of per-app state,
+distinct from a prerequisite flag: not "is this satisfied yes/no" but "which
+API version is this connection's auth actually scoped to." Real integrations
+(Salesforce especially) issue an access token against a specific API
+version, and calls must target that SAME version's endpoints — this fixture
+is where that pin lives, so a real (non-mock) API client has exactly one
+place to read it from, never a per-call guess.
+
 PREREQUISITE_LABELS/PREREQUISITE_ACTIONS live here (not in either track's
 schema.py) because "is this app connected/configured enough?" is the SAME
 question for both automation/schema.py's RECIPES and apps/schema.py's
@@ -48,6 +56,25 @@ def load(path=DEFAULT_PATH):
 
 def is_connected(apps_ws, app):
     return bool((apps_ws.get("connected_apps") or {}).get(app, {}).get("connected"))
+
+
+def api_version(apps_ws, app):
+    """The API version this connection is PINNED to — set once, at real
+    OAuth/connect time, by whatever version the app's auth handshake was
+    actually issued against (Salesforce, notably: an access token is
+    scoped to the API version the connected app's setup used, and a call
+    against a DIFFERENT version's endpoint is not just "maybe fine", it can
+    silently see different field visibility or outright fail).
+
+    THE GUARDRAIL: this value is never inferred, never defaulted to
+    "latest", and never chosen per-call — a real (non-mock)
+    describe_object()/query() implementation must read it from HERE and
+    build its endpoint path from it (e.g.
+    f"/services/data/{api_version}/sobjects/...") every single time. If a
+    connection has no pinned version, treat it as NOT usable for API calls
+    at all — that is a broken/incomplete connection, not something to patch
+    over with a guess. None means exactly that: no pinned version on file."""
+    return (apps_ws.get("connected_apps") or {}).get(app, {}).get("api_version")
 
 
 def prerequisites_met(apps_ws, app, prerequisite_keys):

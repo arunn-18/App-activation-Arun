@@ -28,7 +28,14 @@ because RECIPES' one hand-vetted chain and its tests already refer to them
 by name, not because query() can't do what they do.
 
 Prototype reads salesforce_fixture.json; production would call the real
-Salesforce API with the org's connected credentials.
+Salesforce API with the org's connected credentials — and every one of
+those calls MUST target connected_apps.api_version(apps_ws, "salesforce"),
+the version this connection's auth was actually issued against, never
+"latest" or an inferred default (see that function's docstring for why).
+This mock makes no HTTP call at all, so there is no endpoint path to get
+that wrong yet — but a real client built on this same op surface
+(query/describe_object/list_objects) needs to thread that pinned version
+into every request it builds.
 """
 import json
 from pathlib import Path

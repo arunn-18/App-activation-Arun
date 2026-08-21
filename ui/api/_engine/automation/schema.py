@@ -152,7 +152,7 @@ def compat_error(trigger, prop):
 # Connector recipes ("Make an API call" / app-based automations, v2.8)
 #
 # A recipe is a named, ordered CHAIN of steps against one third-party app.
-# Two step kinds today:
+# Three step kinds today:
 #   api_call — {kind, op, args (may contain {{var}} refs), extract_variables}
 #              op names a function on that app's mock/real service; args are
 #              template-filled from variables collected so far;
@@ -160,6 +160,10 @@ def compat_error(trigger, prop):
 #              response into the variable namespace for LATER steps.
 #   assign   — {kind, target} terminal step; target is usually a {{var}} ref
 #              resolved from an earlier api_call's extracted variables.
+#   add_tag  — {kind, tags} terminal step; the other terminal kind (v2.11),
+#              added for the dynamic connector planner below — a hand-vetted
+#              RECIPES entry doesn't happen to use it yet, but nothing stops
+#              one from doing so.
 #
 # GENERIC (this shape is the mechanism — keep it for recipe #2+): the dict
 # shape (id -> app/name/description/chain/prerequisites), the extract_variables
@@ -170,18 +174,27 @@ def compat_error(trigger, prop):
 # ACTIONS["connector"] below, so a new entry is automatically legal vocabulary
 # for extraction and validation both.
 #
+# DYNAMIC PLANS (v2.11): a RECIPES entry is a human-vetted, hand-written
+# chain — the fast, fully-trusted path. When an ask is connector-shaped but
+# matches NO entry here, automation/planner.py + automation/plan_validator.py
+# let the MODEL compose its own chain at extraction time instead, built from
+# the generic Salesforce object/field catalog (salesforce_schema.py) via the
+# same api_call (op="query")/assign/add_tag step shapes — see
+# ACTIONS["connector"]'s `custom_plan` comment for how a connector action
+# carries one of these instead of a `recipe` id, and plan_validator.py's own
+# docstring for the guardrails a dynamically-composed chain is held to that a
+# RECIPES entry (already proven once by test_connector.py) doesn't need.
+#
 # SHAPED BY HAVING SEEN ONLY ONE EXAMPLE (revisit once the golden dataset
 # lands more recipes):
-#   - every step is api_call or assign; a real recipe #2 might need a
-#     terminal action that isn't `assign` (tag, note, status) or a step that
-#     branches on the response — automation/executor.py's chain runner only
-#     knows these two kinds today.
-#   - the CSM-vs-AE role filtering for this recipe happens INSIDE the mock
+#   - a step that branches on the response has no home yet — every step here
+#     (fixed or dynamic) is a straight-line lookup.
+#   - the CSM-vs-AE role filtering for THIS recipe happens INSIDE the mock
 #     service's op (get_account_team_csm queries "the CSM", not "the team"),
-#     not as generic chain logic — that keeps the executor simple, but it
-#     means recipe #2 needing real branching logic has no home yet; decide
-#     then whether that belongs in the chain shape or stays a mock-service
-#     detail.
+#     not as generic chain logic — fine for a hand-written recipe's own
+#     narrow op, but the dynamic planner's generic query() op takes an
+#     explicit `where` filter instead precisely so a role/priority/stage
+#     filter doesn't need its own named op per case.
 #   - prerequisites are plain boolean workspace-state flags (shared with Track
 #     A via connected_apps.py's PREREQUISITE_LABELS/PREREQUISITE_ACTIONS — a
 #     "does this app need connecting" check is the same question for either
