@@ -17,6 +17,7 @@ connected?). None skips the check — see the connector prerequisites block.
 """
 import re
 import connected_apps
+import mailbox_lookup
 import workspace as wsmod
 
 from . import executor
@@ -29,6 +30,30 @@ ENTITY_WORD = {"tag": "tag", "user": "teammate", "inbox": "shared inbox"}
 ENTITY_LISTS = {"tag": "tags", "user": "agents", "inbox": "shared_inboxes"}
 ENTITY_OTHER_HINT = {"tag": "A different tag", "user": "Someone else",
                      "inbox": "A different inbox"}
+
+
+def _test_email_question(ai):
+    """The test_contact_email question for a connector action — offered as a
+    CHOICE of real mailbox conversations whose sender is a known Salesforce
+    contact (mailbox_lookup.testable_conversations — "test on a real
+    conversation", not an arbitrary made-up address), with allow_other so a
+    genuinely different test address still works exactly as before this
+    existed. Picking an option composes that conversation's real `from`
+    address into chat — the same "the value is what a picked option
+    literally says" contract every other entity choice question already
+    follows, so provenance still sees it as the user's own words."""
+    tparam = schema.ACTIONS["connector"]["params"]["test_contact_email"]
+    convos = mailbox_lookup.testable_conversations()
+    entry = {"slot": f"actions[{ai}].test_contact_email", "question": tparam["question"]}
+    if convos:
+        entry.update({
+            "kind": "choice",
+            "options": [{"label": f"{c['subject']} (from {c['from']})", "value": c["from"]}
+                       for c in convos],
+            "multiple": False, "allow_other": True,
+            "other_hint": "A different contact email",
+        })
+    return entry
 
 
 def _entity_options(ws, kind):
@@ -603,9 +628,7 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
                     errors.append(f"action {ai + 1}: '{recipe['name']}' isn't buildable "
                                   "yet — " + "; ".join(labels))
             if not action.get("test_contact_email"):
-                tparam = schema.ACTIONS["connector"]["params"]["test_contact_email"]
-                missing.append({"slot": f"actions[{ai}].test_contact_email",
-                                "question": tparam["question"]})
+                missing.append(_test_email_question(ai))
             continue
 
         if native is not None:
@@ -649,9 +672,7 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
                     continue
             test_email = action.get("test_contact_email")
             if not test_email:
-                tparam = schema.ACTIONS["connector"]["params"]["test_contact_email"]
-                missing.append({"slot": f"actions[{ai}].test_contact_email",
-                                "question": tparam["question"]})
+                missing.append(_test_email_question(ai))
                 continue
             proof = executor.run_chain(plan_validator.to_chain(plan),
                                        {"contact_email": test_email})

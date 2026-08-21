@@ -199,6 +199,16 @@ export interface FeatureRequest {
     fields_by_object?: Record<string, string[]>;
     inboxes?: string[];
   };
+  /** "test on a real conversation" (v2.13, capability 7) — set only once
+   *  the admin names a real contact/conversation to preview against
+   *  (engine/apps/setup.py's preview_feature()); a courtesy, never required
+   *  to reach status "complete". "no_match" is a clean, honest outcome
+   *  (that contact doesn't exist in Salesforce) — not an error. */
+  preview?:
+    | { status: "ok"; contact_email: string;
+        values_by_object: Record<string, Record<string, unknown>> }
+    | { status: "no_match"; contact_email: string; reason: string }
+    | null;
 }
 
 export interface TurnState {

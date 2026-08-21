@@ -75,6 +75,12 @@ EXTRACTION RULES:
 7. intent_summary: ONE sentence, second person, restating what the user is trying
    to ACHIEVE. "set up Salesforce account cards" -> "You want to see Salesforce
    account and contact details on conversations."
+7b. test_contact_email: filled ONLY from a real email address the user actually
+   wrote — same provenance rule as any other free-text value — when they name
+   one to preview this against ("test it with jordan@acme.example", or picking
+   one of the real conversations offered). This is a COURTESY once the feature
+   is otherwise fully set up, never required for completeness; leave it null
+   until the user actually names one.
 8. unmappable: when the ask genuinely doesn't match any APP FEATURES entry despite
    being an app-setup-shaped request — record {{request: <user's own words>,
    why: <what is missing>}}, leave `feature` null. Never bend a mismatched ask into
@@ -100,6 +106,11 @@ RESPONSE_SCHEMA = {
             "account_fields": {"type": ["array", "null"], "items": {"type": "string"}},
             "contact_fields": {"type": ["array", "null"], "items": {"type": "string"}},
             "inboxes": {"type": ["array", "null"], "items": {"type": "string"}},
+            # "test on a real conversation" (capability 7, rule 7b) — a
+            # courtesy once the feature is otherwise complete, never
+            # required. Same shape/name as the connector recipe's own
+            # test_contact_email (automation/schema.py's ACTIONS["connector"]).
+            "test_contact_email": {"type": ["string", "null"]},
             "closing": {"type": "boolean"},
             "unmappable": {
                 "type": "array",
@@ -110,8 +121,8 @@ RESPONSE_SCHEMA = {
             },
         },
         "required": ["intent_summary", "feature", "connect_requested", "objects",
-                     "account_fields", "contact_fields", "inboxes", "closing",
-                     "unmappable"],
+                     "account_fields", "contact_fields", "inboxes", "test_contact_email",
+                     "closing", "unmappable"],
     },
 }
 

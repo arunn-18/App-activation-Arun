@@ -49,6 +49,7 @@ write) are wired up. Prefill fields, Quick Access, and Syncing Hiver
 conversations with SF records (the product spec's other listed setup
 steps) are explicitly NOT built here — out of scope for this pass.
 """
+import app_catalog
 import connected_apps
 import salesforce_mock
 import workspace as wsmod
@@ -73,7 +74,7 @@ def _question(slot, prompt, options, multiple=False):
             "allow_other": False, "other_hint": ""}
 
 
-def _result(status, errors=None, missing=None, feature=None, progress=None):
+def _result(status, errors=None, missing=None, feature=None, progress=None, preview=None):
     missing = missing or []
     return {
         "status": status,
@@ -82,7 +83,49 @@ def _result(status, errors=None, missing=None, feature=None, progress=None):
         "questions_structured": missing[:MAX_QUESTIONS],
         "feature": feature,
         "progress": progress or {},
+        "preview": preview,
     }
+
+
+def preview_feature(feature, test_contact_email):
+    """"Test on a real conversation" (capability 7) for a VIEW feature: show
+    the REAL field values this feature would display for one real contact,
+    by actually querying the mock service — the Track A analogue of
+    automation/executor.py's connector test-run, for a mechanism with no
+    chain, no terminal action: just "does the data actually show up." A
+    contact-not-found lookup is a real, valid outcome (the same "no_match,
+    not an error" stance the connector executor already takes), never
+    faked with placeholder values.
+
+    `feature`: the completed feature dict resolve_setup() already returned
+    (objects/fields_by_object — which fields were CHOSEN, by display label,
+    not the object's full field list).
+
+    SHAPED BY ONE EXAMPLE: only resolves Account/Contact records — the two
+    objects this pass's one view feature actually offers. A future feature
+    covering Opportunity/Case needs its own record-source line added here,
+    the same "supply the real mapping, don't invent one" discipline
+    app_catalog.py's own comments already ask for."""
+    contacts = salesforce_mock.find_contact_by_email(test_contact_email).get("records") or []
+    if not contacts:
+        return {"status": "no_match", "contact_email": test_contact_email,
+                "reason": f"no Salesforce contact found for '{test_contact_email}'"}
+    contact = contacts[0]
+    records_by_object = {"Contact": contact}
+    accounts = salesforce_mock.get_account(contact.get("account_id")).get("records") or []
+    if accounts:
+        records_by_object["Account"] = accounts[0]
+
+    values_by_object = {}
+    for obj, chosen_labels in (feature.get("fields_by_object") or {}).items():
+        record = records_by_object.get(obj)
+        if record is None:
+            continue
+        api_by_label = app_catalog.field_by_label(feature["app"], obj)
+        values_by_object[obj] = {label: record.get(api_by_label.get(label))
+                                 for label in chosen_labels}
+    return {"status": "ok", "contact_email": test_contact_email,
+            "values_by_object": values_by_object}
 
 
 def resolve_setup(feature_id, feature_setup, apps_ws, ws=None):
@@ -199,7 +242,16 @@ def resolve_setup(feature_id, feature_setup, apps_ws, ws=None):
                       multiple=True)
         return _result("needs_info", errors=errors, missing=[q], progress=progress)
 
-    return _result("complete", progress=progress, feature={
+    feature_out = {
         "id": feature_id, "app": app, "name": f["name"], "description": f["description"],
         "objects": objects, "fields_by_object": fields_by_object, "inboxes": inboxes,
-    })
+    }
+    # "test on a real conversation" (capability 7) — a courtesy shown
+    # ALONGSIDE completion, never blocking it: the feature is already fully
+    # enabled without this. is_write is excluded on purpose — a write
+    # feature creates a NEW record, there's no existing real data to show a
+    # preview of yet (see preview_feature()'s own SHAPED-BY-ONE-EXAMPLE note).
+    preview = None
+    if not is_write and feature_setup.get("test_contact_email"):
+        preview = preview_feature(feature_out, feature_setup["test_contact_email"])
+    return _result("complete", progress=progress, feature=feature_out, preview=preview)

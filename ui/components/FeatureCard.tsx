@@ -99,6 +99,10 @@ export default function FeatureCard({
         </div>
       )}
 
+      {featureRequest.preview && (
+        <FeaturePreviewStrip preview={featureRequest.preview} />
+      )}
+
       {featureRequest.status === "invalid" && featureRequest.errors.length > 0 && (
         <div className="border-t border-hairline bg-destructive-soft px-4 py-2.5">
           <p className="text-[12px] font-semibold text-destructive">
@@ -121,6 +125,42 @@ export default function FeatureCard({
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+/** "Test on a real conversation" (v2.13, capability 7): proof the feature
+ *  shows real data for a real contact, the Track A analogue of RuleCard's
+ *  TestRunStrip — a courtesy shown once the admin names a real contact to
+ *  preview against, never required for the card above to say "Enabled". */
+function FeaturePreviewStrip({
+  preview,
+}: {
+  preview: NonNullable<import("@/lib/api").FeatureRequest["preview"]>;
+}) {
+  if (preview.status === "no_match")
+    return (
+      <div className="border-t border-hairline bg-destructive-soft px-4 py-2.5">
+        <span className="text-[12.5px] text-destructive">
+          <span className="font-semibold">Test run: no match</span> — {preview.reason}.
+        </span>
+      </div>
+    );
+  return (
+    <div className="space-y-1.5 border-t border-hairline px-4 py-3 text-[12.5px]">
+      <p className="font-medium text-ink">
+        Test run against <span className="font-mono text-[12px]">{preview.contact_email}</span>:
+      </p>
+      {Object.entries(preview.values_by_object).map(([obj, values]) => (
+        <p key={obj} className="text-ink-soft">
+          <span className="font-mono text-[11px] font-semibold text-muted-foreground">
+            {obj.toUpperCase()}
+          </span>{" "}
+          {Object.entries(values)
+            .map(([k, v]) => `${k}: ${v ?? "—"}`)
+            .join(", ")}
+        </p>
+      ))}
     </div>
   );
 }

@@ -15,6 +15,7 @@ place that talks to both.
 import json
 
 import docent
+import mailbox_lookup
 import router
 from apps import extract as apps_extract
 from apps import schema as apps_schema
@@ -390,7 +391,40 @@ def render_feature(feature_result):
         lines.append("STATUS  Can't enable — " + "; ".join(feature_result.get("errors", [])))
     else:
         lines.append("STATUS  In progress")
+    preview = feature_result.get("preview")
+    if preview:
+        lines.append(_render_feature_preview(preview))
     return "\n".join(lines)
+
+
+def _render_feature_preview(preview):
+    """"Test on a real conversation" (capability 7) for a Track A view
+    feature — the real field values apps.setup.preview_feature() actually
+    found for one real contact, rendered the same "show what's real" way
+    _render_test_run() shows a connector's test-run result."""
+    if preview["status"] == "no_match":
+        return f"TEST RUN  no match — {preview['reason']}"
+    lines = [f"TEST RUN  against {preview['contact_email']}:"]
+    for obj, values in (preview.get("values_by_object") or {}).items():
+        rendered = ", ".join(f"{k}: {v if v is not None else MISSING}"
+                             for k, v in values.items())
+        lines.append(f"  {obj}  {rendered}")
+    return "\n".join(lines)
+
+
+def _test_conversation_suggestions(limit=2):
+    """A few real conversations to nudge toward trying, once a capability
+    is complete but hasn't been test-run yet — the same
+    mailbox_lookup.testable_conversations() the connector's own
+    test_contact_email question already offers as choices, phrased as a
+    suggestion here since a Track A test-run is a courtesy, never required
+    for completeness the way it is for a dynamically-composed connector
+    plan."""
+    convos = mailbox_lookup.testable_conversations(limit=limit)
+    if not convos:
+        return ""
+    examples = "; ".join(f"'{c['from']}' ({c['subject']})" for c in convos)
+    return f"Want to see it in action? Try a real conversation, e.g. {examples}."
 
 
 def _mapping_explanation(spec, feature_result):
@@ -591,8 +625,10 @@ def respond(client, messages, model=None, ws=None, apps_ws=None):
         if feature_result["status"] == "complete":
             feat = feature_result["feature"]
             lead = f"{mapping}\n\n" if mapping else ""
+            tail = ("" if feature_result.get("preview")
+                   else "\n\n" + _test_conversation_suggestions())
             return (lead + f"{feat['name']} is set up — {feat['description']}\n\n"
-                    + render_feature(feature_result))
+                    + render_feature(feature_result) + tail).rstrip()
         parts = ([mapping] if mapping else []) + [render_feature(feature_result)]
         if feature_result["status"] == "invalid":
             parts.append("This isn't usable yet in this workspace: "

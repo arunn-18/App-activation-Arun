@@ -173,3 +173,13 @@ def label_for(app, object_name, api_name):
     result needs to show a real name instead of an internal api key."""
     f = CATALOG.get(app, {}).get(object_name, {}).get("fields", {}).get(api_name)
     return f["label"] if f else api_name
+
+
+def field_by_label(app, object_name):
+    """label -> api field name for one object — the reverse of label_for(),
+    used wherever a chosen DISPLAY field (what Track A's field-config step
+    stores) needs to be resolved back to the fixture's real key to actually
+    fetch a value for it (apps/setup.py's "test on a real conversation"
+    preview)."""
+    fields = CATALOG.get(app, {}).get(object_name, {}).get("fields", {})
+    return {f["label"]: name for name, f in fields.items()}

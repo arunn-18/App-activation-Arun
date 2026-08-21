@@ -1,9 +1,13 @@
 {
   "contacts": [
-    {"contact_id": "003A1", "email": "jordan@acme.example", "account_id": "001A1"},
-    {"contact_id": "003B1", "email": "sam@globex.example", "account_id": "001B1"},
-    {"contact_id": "003C1", "email": "morgan@initech.example", "account_id": "001C1"},
-    {"contact_id": "003D1", "email": "arunnayak.b@grexit.com", "account_id": "001D1"}
+    {"contact_id": "003A1", "email": "jordan@acme.example", "account_id": "001A1",
+     "name": "Jordan Kim", "phone": "+1-555-0101", "role": "Procurement Manager"},
+    {"contact_id": "003B1", "email": "sam@globex.example", "account_id": "001B1",
+     "name": "Sam Reyes", "phone": "+1-555-0102", "role": "Operations Lead"},
+    {"contact_id": "003C1", "email": "morgan@initech.example", "account_id": "001C1",
+     "name": "Morgan Ellis", "phone": "+1-555-0103", "role": "IT Director"},
+    {"contact_id": "003D1", "email": "arunnayak.b@grexit.com", "account_id": "001D1",
+     "name": "Arun Nayak", "phone": "+1-555-0104", "role": "Account Admin"}
   ],
   "accounts": [
     {"account_id": "001A1", "name": "Acme Corp", "owner_email": "marcus.lee@hiver.example"},
