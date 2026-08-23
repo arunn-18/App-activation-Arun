@@ -197,6 +197,9 @@ export interface FeatureRequest {
     id: string; app: string; name: string; description: string;
     objects: string[]; fields_by_object: Record<string, string[]>;
     inboxes: string[];
+    /** "view" (default) shows existing data; "write" creates a NEW record —
+     *  decides preview vs. the write-test-create form below. */
+    kind?: "view" | "write";
   };
   /** what's been resolved so far, for a running summary — same spirit as
    *  RuleCard showing partial WHEN/IF/THEN while slots are still open. */
@@ -389,6 +392,58 @@ export async function sendAppChat(
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error ?? `apps/${app}/chat: HTTP ${res.status}`);
   return data as TurnState;
+}
+
+/** capability 7 for a WRITE Track A feature — the result of actually
+ *  creating a mock record (engine/copilot.test_create_feature). "error"
+ *  covers both a rejected submission (an unexposed field) and a server-
+ *  side prerequisite recheck failing — never silently ignored either way. */
+export interface TestCreateResult {
+  status: "ok" | "error";
+  object?: string;
+  record?: Record<string, unknown>;
+  reason?: string;
+}
+
+/** Automations page ("/"): POST /api/features/test-create. `feature` is the
+ *  completed feature dict the client already has (FeatureRequest.feature)
+ *  — the server has no independent memory of which fields were configured,
+ *  same as every other turn in this engine trusting the client-echoed
+ *  state. */
+export async function testCreateFeatureAutomation(
+  feature: NonNullable<FeatureRequest["feature"]>,
+  fieldValues: Record<string, string>
+): Promise<TestCreateResult> {
+  const res = await fetch(`${API_BASE}/api/features/test-create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ feature, field_values: fieldValues }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error ?? `features/test-create: HTTP ${res.status}`);
+  return data as TestCreateResult;
+}
+
+/** Apps panel ("/apps"): POST /api/apps/<app>/features/<feature_id>/test-create. */
+export async function testCreateFeatureApp(
+  app: string,
+  featureId: string,
+  feature: NonNullable<FeatureRequest["feature"]>,
+  fieldValues: Record<string, string>
+): Promise<TestCreateResult> {
+  const res = await fetch(
+    `${APPS_API_BASE}/api/apps/${encodeURIComponent(app)}/features/` +
+      `${encodeURIComponent(featureId)}/test-create`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feature, field_values: fieldValues }),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok)
+    throw new Error(data?.error ?? `apps/${app}/features/${featureId}/test-create: HTTP ${res.status}`);
+  return data as TestCreateResult;
 }
 
 export interface ProgressEvent {

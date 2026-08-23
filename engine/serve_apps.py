@@ -31,6 +31,12 @@ Endpoints:
                                     this app (today: a no-op scope, since
                                     there is exactly one recipe total — see
                                     the SCOPING note below)
+  POST /api/apps/<app>/features/<feature_id>/test-create
+                                    capability 7 for a WRITE feature:
+                                    {"feature": <the completed feature dict>,
+                                    "field_values": {label: value}} -> a
+                                    real (mock) created record — see
+                                    copilot.test_create_feature()
 
 SCOPING NOTE (shaped by having seen only one app/recipe): with exactly one
 recipe, and it belonging to Salesforce, "scoped to this app" is automatically
@@ -59,6 +65,7 @@ WS = wsmod.load()
 APP_PATH = re.compile(r"^/api/apps/([^/]+)$")
 FEATURE_ENABLE_PATH = re.compile(r"^/api/apps/([^/]+)/features/([^/]+)/enable$")
 CHAT_PATH = re.compile(r"^/api/apps/([^/]+)/chat$")
+TEST_CREATE_PATH = re.compile(r"^/api/apps/([^/]+)/features/([^/]+)/test-create$")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -126,6 +133,22 @@ class Handler(BaseHTTPRequestHandler):
             # does.
             _, feature_id = m.groups()
             return self._send(200, features.resolve_setup(feature_id, {}, APPS_WS, WS))
+        m = TEST_CREATE_PATH.match(self.path)
+        if m:
+            # capability 7's write-feature test (see copilot.test_create_
+            # feature's own docstring) — a real form submission, not a chat
+            # turn: the client sends back the completed `feature` dict it
+            # already has plus the values typed into the test form.
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                req = json.loads(self.rfile.read(length) or b"{}")
+                feature = req.get("feature")
+                field_values = req.get("field_values") or {}
+                if not isinstance(feature, dict):
+                    return self._send(400, {"error": "feature (the completed feature dict) required"})
+                return self._send(200, copilot.test_create_feature(feature, field_values, APPS_WS))
+            except Exception as e:
+                return self._send(500, {"error": f"{type(e).__name__}: {str(e)[:300]}"})
         m = CHAT_PATH.match(self.path)
         if m:
             app = m.group(1)
@@ -152,5 +175,6 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print("Apps-panel entry -> http://127.0.0.1:8011  "
          "(GET /api/apps, GET /api/apps/<app>, POST /api/apps/<app>/chat, "
-         "POST /api/apps/<app>/features/<id>/enable)")
+         "POST /api/apps/<app>/features/<id>/enable, "
+         "POST /api/apps/<app>/features/<id>/test-create)")
     ThreadingHTTPServer(("127.0.0.1", 8011), Handler).serve_forever()

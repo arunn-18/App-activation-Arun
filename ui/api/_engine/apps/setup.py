@@ -128,6 +128,47 @@ def preview_feature(feature, test_contact_email):
             "values_by_object": values_by_object}
 
 
+def test_create(feature, field_values):
+    """"Test on a real conversation" (capability 7) for a WRITE feature:
+    actually create a mock record from admin-submitted form values — the
+    write analogue of preview_feature() above. A view feature's test shows
+    EXISTING data; a write feature has no existing record to show, so
+    testing it means the create genuinely has to happen (against the mock,
+    never a real org), not a preview of anything. A live test surfaced the
+    gap this closes: the "want to test it?" nudge was showing for a write
+    feature with nothing wired up to act on it — see copilot._is_write_
+    feature()'s own comment for that story.
+
+    `feature`: the completed feature dict resolve_setup() already returned
+    (objects/fields_by_object — which fields the admin chose to expose, by
+    display label — same shape preview_feature() takes). `field_values` is
+    {label: value} submitted from the test form; a label outside
+    fields_by_object is REJECTED, not silently dropped — the same "never
+    let a submission smuggle in something not configured" discipline every
+    provenance check in this engine already holds itself to.
+
+    SHAPED BY ONE EXAMPLE: only creates a Contact — the one write feature
+    this pass actually offers. A future write feature covering another
+    object needs its own create_<object> op in salesforce_mock.py and its
+    own branch here, the same discipline preview_feature()'s own comment
+    already asks for."""
+    fields_by_object = feature.get("fields_by_object") or {}
+    object_name = next(iter(fields_by_object), None)
+    if object_name != "Contact":
+        return {"status": "error",
+                "reason": f"don't know how to create a {object_name or 'record'} yet"}
+    chosen_labels = set(fields_by_object[object_name])
+    unknown = [label for label in field_values if label not in chosen_labels]
+    if unknown:
+        return {"status": "error",
+                "reason": f"not exposed by this feature: {', '.join(unknown)}"}
+    api_by_label = app_catalog.field_by_label(feature["app"], object_name)
+    api_fields = {api_by_label[label]: value for label, value in field_values.items()
+                 if label in api_by_label and value not in (None, "")}
+    record = salesforce_mock.create_contact(api_fields)
+    return {"status": "ok", "object": object_name, "record": record}
+
+
 def resolve_setup(feature_id, feature_setup, apps_ws, ws=None):
     """feature_setup: the slots apps/extract.py filled this turn from the
     WHOLE conversation so far — connect_requested, objects, <object>_fields
@@ -245,6 +286,9 @@ def resolve_setup(feature_id, feature_setup, apps_ws, ws=None):
     feature_out = {
         "id": feature_id, "app": app, "name": f["name"], "description": f["description"],
         "objects": objects, "fields_by_object": fields_by_object, "inboxes": inboxes,
+        # the UI needs this to decide preview vs. test_create rendering —
+        # never inferred client-side from field names or anything else.
+        "kind": f.get("kind", "view"),
     }
     # "test on a real conversation" (capability 7) — a courtesy shown
     # ALONGSIDE completion, never blocking it: the feature is already fully

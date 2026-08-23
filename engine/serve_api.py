@@ -15,6 +15,11 @@ Endpoints (CORS open to localhost dev servers):
                                    data: {"type":"progress","stage":"lookup",...}
                                    data: {"type":"progress","stage":"validating"}
                                    data: {"type":"result", ...TurnState}
+  POST /api/features/test-create capability 7 for a WRITE Track A feature:
+                                 {"feature": <the completed feature dict>,
+                                 "field_values": {label: value}} -> a real
+                                 (mock) created record — see
+                                 copilot.test_create_feature()
 
 The chat UI for humans stays at serve2.py (port 8001); this server returns machine
 state so a frontend can render the draft, questions, and final rule as components.
@@ -87,6 +92,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"error": f"{type(e).__name__}: {str(e)[:300]}"})
         if self.path == "/api/chat/stream":
             return self._stream_chat()
+        if self.path == "/api/features/test-create":
+            # capability 7 for a WRITE Track A feature (see copilot.
+            # test_create_feature's docstring) — a real form submission,
+            # not a chat turn, same endpoint contract as serve_apps.py's
+            # app-scoped version.
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                req = json.loads(self.rfile.read(length) or b"{}")
+                feature = req.get("feature")
+                field_values = req.get("field_values") or {}
+                if not isinstance(feature, dict):
+                    return self._send(400, {"error": "feature (the completed feature dict) required"})
+                return self._send(200, copilot.test_create_feature(feature, field_values, APPS_WS))
+            except Exception as e:
+                return self._send(500, {"error": f"{type(e).__name__}: {str(e)[:300]}"})
         if self.path == "/api/preview":
             # dry-run a FINAL rule JSON over the mailbox fixture — pure code,
             # no LLM; blast radius before the rule exists

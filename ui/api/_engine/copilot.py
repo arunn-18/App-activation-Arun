@@ -14,6 +14,7 @@ place that talks to both.
 """
 import json
 
+import connected_apps
 import docent
 import mailbox_lookup
 import router
@@ -347,6 +348,35 @@ def feature_request_result(app_spec, apps_ws, ws=None):
     result = apps_setup.resolve_setup(fid, app_spec, apps_ws, ws)
     result["feature_id"] = fid
     return result
+
+
+def test_create_feature(feature, field_values, apps_ws):
+    """The API layer's entry point for capability 7's write-feature test —
+    called from a real form submission (see ui/components/FeatureCard.tsx's
+    write-test form), NOT a chat turn: creating a record is a side effect
+    with real (mock) consequences, not something to infer from prose the
+    way a chat answer is. `feature` is the completed feature dict the
+    client already has (feature_request.feature — same shape
+    apps_setup.preview_feature() takes); the server has no independent
+    memory of which fields were configured, so it trusts this dict the same
+    way every other turn in this engine trusts the client-echoed transcript
+    as its only state.
+
+    Prerequisites are re-checked here regardless of what the client
+    believes finished setup — same "never trust client-side completeness,
+    re-verify server-side" discipline automation/validator.py's prerequisite
+    block already holds a connector recipe to."""
+    fid = (feature or {}).get("id")
+    f = apps_schema.FEATURES.get(fid)
+    if f is None:
+        return {"status": "error", "reason": f"unknown feature '{fid}'"}
+    if f.get("kind") != "write":
+        return {"status": "error", "reason": f"'{f['name']}' has nothing to create"}
+    unmet = connected_apps.prerequisites_met(apps_ws, f["app"], f["prerequisites"])
+    if unmet:
+        return {"status": "error",
+                "reason": f"not ready yet — blocked on: {', '.join(unmet)}"}
+    return apps_setup.test_create(feature, field_values)
 
 
 def _empty_result(feature_result):

@@ -37,11 +37,19 @@ that wrong yet — but a real client built on this same op surface
 (query/describe_object/list_objects) needs to thread that pinned version
 into every request it builds.
 """
+import itertools
 import json
 from pathlib import Path
 
 import salesforce_schema
 from apps import schema as apps_schema
+
+# capability 4's create-a-record demo path (test_create() below) needs a
+# fresh id per created record within this server process — never colliding
+# with the fixture's own contact_ids, and never persisted to
+# salesforce_fixture.json (same in-memory-only demo-state precedent as
+# connected_apps.connect()).
+_created_contact_ids = itertools.count(9001)
 
 DEFAULT_PATH = Path(__file__).parent / "salesforce_fixture.json"
 
@@ -171,3 +179,25 @@ def query(object_name, where=None, fields=None, fixture=None):
         return all(str(r.get(w.get("field"))) == str(w.get("eq")) for w in where)
 
     return _envelope([r for r in records if matches(r)])
+
+
+def create_contact(fields):
+    """Mock 'create a new Contact' call — the write analogue of
+    find_contact_by_email/describe_fields above, and the actual side effect
+    behind capability 4's "test on a real conversation" (apps/setup.py's
+    test_create()): a live test surfaced that offering a write feature's
+    admin a "try it" nudge with NOTHING behind it was worse than no nudge at
+    all, so this makes the create genuinely happen (against the mock, never
+    a real org) and returns a real created record, the same "prove it, don't
+    just say it completed" standard every other test-run in this engine
+    already holds itself to (automation/executor.py's run_chain,
+    preview_feature() for a view feature).
+
+    `fields` is {api_field_name: value}, already resolved from display
+    labels by the caller (apps/setup.py knows the label->api mapping via
+    app_catalog.field_by_label) — this function only knows Salesforce's own
+    field names, same as every other op here. In-memory only for this
+    server process; never written back to salesforce_fixture.json."""
+    contact_id = f"created-{next(_created_contact_ids)}"
+    record = {"contact_id": contact_id, **fields}
+    return record

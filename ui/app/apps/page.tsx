@@ -14,6 +14,7 @@ import {
   hasQuestionForm,
   hasRuleCard,
   sendAppChat,
+  testCreateFeatureApp,
   type AppCapability,
   type AppCatalog,
   type ChatMessage,
@@ -252,7 +253,17 @@ export default function AppsPanel() {
                     </div>
                   )}
                   {m.role === "assistant" && work[i] && hasFeatureCard(work[i]) && (
-                    <FeatureCard featureRequest={work[i].feature_request!} />
+                    <FeatureCard
+                      featureRequest={work[i].feature_request!}
+                      onTestCreate={(fieldValues) =>
+                        testCreateFeatureApp(
+                          selectedApp,
+                          work[i].feature_request!.feature_id!,
+                          work[i].feature_request!.feature!,
+                          fieldValues
+                        )
+                      }
+                    />
                   )}
                   {m.role === "assistant" && work[i] && hasRuleCard(work[i]) && (
                     <RuleCard

@@ -21,6 +21,7 @@ import sys
 import connected_apps
 import copilot
 import mailbox_lookup
+import salesforce_mock
 from apps import setup as features
 from automation import validator
 
@@ -100,6 +101,42 @@ def run():
     r5 = features.resolve_setup(WRITE_FEATURE_ID, write_fs, connected)
     check("a write-kind feature never gets a preview — nothing exists to show yet",
           r5["status"] == "complete" and r5["preview"] is None)
+
+    # ---- capability 7 for a WRITE feature: test_create() actually creates --
+    # (the follow-up fix: withholding the nudge wasn't enough on its own —
+    # a write feature needed a REAL way to prove itself, same as a view
+    # feature's preview_feature() or a connector's real test-run.)
+    check("create_contact() returns a real record with a fresh id",
+          salesforce_mock.create_contact({"Name": "Jamie Doe"})["contact_id"]
+          .startswith("created-"))
+
+    write_feature = r5["feature"]
+    tc1 = features.test_create(write_feature, {"Contact Name": "Jamie Doe"})
+    check("test_create happy path: creates a real record via the mock, "
+          "resolving the display label to Salesforce's own api field name",
+          tc1["status"] == "ok" and tc1["object"] == "Contact"
+          and tc1["record"]["name"] == "Jamie Doe"
+          and tc1["record"]["contact_id"].startswith("created-"))
+
+    tc2 = features.test_create(write_feature, {"Contact Name": "Jamie Doe",
+                                               "Contact Email": "jamie@example.com"})
+    check("test_create rejects a field the admin never chose to expose -- "
+          "never silently drop it, never silently accept it",
+          tc2["status"] == "error" and "Contact Email" in tc2["reason"])
+
+    check("copilot.test_create_feature: unknown feature id is an error",
+          copilot.test_create_feature({"id": "not_a_real_feature"}, {}, connected)
+          ["status"] == "error")
+    check("copilot.test_create_feature: a VIEW feature has nothing to create",
+          copilot.test_create_feature({"id": FEATURE_ID}, {}, connected)
+          ["status"] == "error")
+    check("copilot.test_create_feature: re-checks prerequisites server-side, "
+          "never trusting the client's belief that setup finished",
+          copilot.test_create_feature(write_feature, {"Contact Name": "X"},
+                                      connected_apps.load())["status"] == "error")
+    tc3 = copilot.test_create_feature(write_feature, {"Contact Name": "Jamie Doe"}, connected)
+    check("copilot.test_create_feature: happy path end to end",
+          tc3["status"] == "ok" and tc3["record"]["name"] == "Jamie Doe")
 
     # ---- rendering: TEST RUN line, or a real-conversation nudge when absent -
     draft_with_preview = copilot.render_feature(r4)

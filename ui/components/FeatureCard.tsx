@@ -1,6 +1,8 @@
 "use client";
 
-import type { FeatureRequest } from "@/lib/api";
+import { useState } from "react";
+import type { FeatureRequest, TestCreateResult } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 
 const STATUS_STYLE: Record<FeatureRequest["status"], string> = {
   complete: "bg-bone text-ink",
@@ -31,8 +33,14 @@ const FEATURE_NAMES: Record<string, string> = {
  *  uses — this card is the running summary, not the input. */
 export default function FeatureCard({
   featureRequest,
+  onTestCreate,
 }: {
   featureRequest: FeatureRequest;
+  /** capability 7 for a WRITE feature — submits the test form's values and
+   *  resolves to the real (mock) create result. Omitted entirely on a page
+   *  that doesn't wire up the endpoint; the form simply doesn't render then,
+   *  same "don't offer what isn't there" stance as everything else here. */
+  onTestCreate?: (fieldValues: Record<string, string>) => Promise<TestCreateResult>;
 }) {
   const feat = featureRequest.feature;
   const progress = featureRequest.progress ?? {};
@@ -103,6 +111,10 @@ export default function FeatureCard({
         <FeaturePreviewStrip preview={featureRequest.preview} />
       )}
 
+      {featureRequest.status === "complete" && feat?.kind === "write" && onTestCreate && (
+        <WriteTestForm fieldsByObject={fieldsByObject} onTestCreate={onTestCreate} />
+      )}
+
       {featureRequest.status === "invalid" && featureRequest.errors.length > 0 && (
         <div className="border-t border-hairline bg-destructive-soft px-4 py-2.5">
           <p className="text-[12px] font-semibold text-destructive">
@@ -161,6 +173,79 @@ function FeaturePreviewStrip({
             .join(", ")}
         </p>
       ))}
+    </div>
+  );
+}
+
+/** "Test on a real conversation" (capability 7) for a WRITE feature: a
+ *  view feature's test shows EXISTING data (FeaturePreviewStrip above); a
+ *  write feature creates something new, so testing it means actually
+ *  submitting values and creating a real (mock) record — the write
+ *  analogue, not a variant of the same strip. A live test found the gap
+ *  this closes: the old text-only nudge promised something with no form
+ *  and no endpoint behind it at all. */
+function WriteTestForm({
+  fieldsByObject,
+  onTestCreate,
+}: {
+  fieldsByObject: Record<string, string[]>;
+  onTestCreate: (fieldValues: Record<string, string>) => Promise<TestCreateResult>;
+}) {
+  const object = Object.keys(fieldsByObject)[0];
+  const labels = fieldsByObject[object] ?? [];
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<TestCreateResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!object || labels.length === 0) return null;
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await onTestCreate(values));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2.5 border-t border-hairline px-4 py-3">
+      <p className="text-[12.5px] font-medium text-ink">
+        Test it — create a real {object} from these values:
+      </p>
+      <form onSubmit={submit} className="space-y-2">
+        {labels.map((label) => (
+          <div key={label} className="flex items-center gap-2">
+            <label className="w-36 shrink-0 text-[12px] text-ink-soft">{label}</label>
+            <input
+              value={values[label] ?? ""}
+              onChange={(e) => setValues((v) => ({ ...v, [label]: e.target.value }))}
+              placeholder={`Enter ${label.toLowerCase()}`}
+              className="min-w-0 flex-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[12.5px] outline-none focus:border-ink-soft"
+            />
+          </div>
+        ))}
+        <Button type="submit" size="sm" disabled={busy}>
+          {busy ? "Creating…" : "Create"}
+        </Button>
+      </form>
+      {error && <p className="text-[12px] text-destructive">{error}</p>}
+      {result?.status === "error" && (
+        <p className="text-[12px] text-destructive">{result.reason}</p>
+      )}
+      {result?.status === "ok" && (
+        <p className="text-[12.5px] text-ink-soft">
+          <span className="font-medium text-ink">{object} created</span> —{" "}
+          {Object.entries(result.record ?? {})
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(", ")}
+        </p>
+      )}
     </div>
   );
 }

@@ -27,6 +27,7 @@ import {
   hasRuleCard,
   progressLabel,
   sendChatStream,
+  testCreateFeatureAutomation,
   type ChatMessage,
   type Vocabulary,
   type Workspace,
@@ -486,6 +487,12 @@ export default function Playground() {
                     hasFeatureCard(session.work[i].turn!) && (
                     <FeatureCard
                       featureRequest={session.work[i].turn!.feature_request!}
+                      onTestCreate={(fieldValues) =>
+                        testCreateFeatureAutomation(
+                          session.work[i].turn!.feature_request!.feature!,
+                          fieldValues
+                        )
+                      }
                     />
                   )}
                   {m.role === "assistant" &&
