@@ -106,7 +106,7 @@ def run():
 
     router.classify = _automation_classify
 
-    automation_extract.extract = lambda client, messages, model=None, ws=None, on_event=None: (
+    automation_extract.extract = lambda client, messages, model=None, ws=None, on_event=None, app=None: (
         _base_action(recipe=RECIPE_ID))
     try:
         msgs = [{"role": "user", "content": "assign new conversations to the account CSM"}]
@@ -117,7 +117,7 @@ def run():
     finally:
         automation_extract.extract = original_automation_extract
 
-    automation_extract.extract = lambda client, messages, model=None, ws=None, on_event=None: (
+    automation_extract.extract = lambda client, messages, model=None, ws=None, on_event=None, app=None: (
         _base_action(native_action_id=NATIVE_ID))
     try:
         msgs = [{"role": "user", "content": "create a clickup task for this conversation"}]
@@ -132,7 +132,7 @@ def run():
 
     plan = {"app": "salesforce", "plan_summary": "Assign to the Account Owner",
             "steps": [], "terminal": {"kind": "assign", "target": None, "tags": None}}
-    automation_extract.extract = lambda client, messages, model=None, ws=None, on_event=None: (
+    automation_extract.extract = lambda client, messages, model=None, ws=None, on_event=None, app=None: (
         _base_action(custom_plan=plan))
     try:
         msgs = [{"role": "user", "content": "assign to the account owner instead of the csm"}]
@@ -146,7 +146,7 @@ def run():
         automation_extract.extract = original_automation_extract
 
     # ---- nothing matched yet -> nothing to explain --------------------------
-    automation_extract.extract = lambda client, messages, model=None, ws=None, on_event=None: (
+    automation_extract.extract = lambda client, messages, model=None, ws=None, on_event=None, app=None: (
         _base_action())
     try:
         msgs = [{"role": "user", "content": "tag emails from acme.com as VIP"}]

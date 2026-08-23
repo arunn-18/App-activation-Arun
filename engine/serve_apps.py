@@ -28,9 +28,12 @@ Endpoints:
                                     the real multi-turn flow)
   POST /api/apps/<app>/chat         Track B: {"messages":[...]} ->
                                     copilot.respond_structured(), scoped to
-                                    this app (today: a no-op scope, since
-                                    there is exactly one recipe total — see
-                                    the SCOPING note below)
+                                    this app — see the SCOPING note below
+  GET  /api/apps/<app>/testable-conversations
+                                    capability 7's conversation picker —
+                                    real mailbox conversations to test a
+                                    view feature's preview or a write
+                                    feature's create-form against
   POST /api/apps/<app>/features/<feature_id>/test-create
                                     capability 7 for a WRITE feature:
                                     {"feature": <the completed feature dict>,
@@ -38,14 +41,16 @@ Endpoints:
                                     real (mock) created record — see
                                     copilot.test_create_feature()
 
-SCOPING NOTE (shaped by having seen only one app/recipe): with exactly one
-recipe, and it belonging to Salesforce, "scoped to this app" is automatically
-true — there is nothing else to filter out. When recipe #2 lands for a
-DIFFERENT app, thread an `app` filter into extract.build_system()'s vocab
-block (schema.RECIPES.items() filtered by app) and into validator's recipe
-lookup here, so this endpoint only ever offers/accepts recipes for its own
-app. Do not build that filtering machinery now against a single data point —
-there's no second example yet to prove the filter's shape against.
+SCOPING NOTE: /chat now threads `app` into copilot.respond_structured() ->
+automation_extract.extract(), which scopes CONNECTOR RECIPES/NATIVE APP
+ACTIONS (and the custom_plan SALESFORCE OBJECTS line) to just this app —
+see automation/extract.py's _vocab_block() docstring. This was flagged as a
+"no-op until a second app exists" TODO when there was only one recipe
+(Salesforce); ClickUp's native action is what proved the filter's shape.
+validator.py's recipe/native-action lookup is NOT separately scoped — the
+vocab filter above already keeps extraction from proposing an out-of-scope
+id in the first place, so there's nothing for the validator to catch that
+this doesn't already prevent.
 """
 import json
 import re
@@ -53,6 +58,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import connected_apps
 import copilot
+import mailbox_lookup
 import router
 import workspace as wsmod
 from apps import setup as features
@@ -66,6 +72,7 @@ APP_PATH = re.compile(r"^/api/apps/([^/]+)$")
 FEATURE_ENABLE_PATH = re.compile(r"^/api/apps/([^/]+)/features/([^/]+)/enable$")
 CHAT_PATH = re.compile(r"^/api/apps/([^/]+)/chat$")
 TEST_CREATE_PATH = re.compile(r"^/api/apps/([^/]+)/features/([^/]+)/test-create$")
+TESTABLE_CONVERSATIONS_PATH = re.compile(r"^/api/apps/([^/]+)/testable-conversations$")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -120,6 +127,15 @@ class Handler(BaseHTTPRequestHandler):
                 "track_b_recipes": recipes,
                 "native_actions": natives,
             })
+        m = TESTABLE_CONVERSATIONS_PATH.match(self.path)
+        if m:
+            # capability 7's conversation picker — shown BEFORE the
+            # write-test-create form (or a view feature's preview), never
+            # skipped straight past. Salesforce-only today, same as
+            # mailbox_lookup.testable_conversations()'s own default fixture;
+            # an app with no contacts-shaped fixture has nothing to offer
+            # here yet.
+            return self._send(200, {"conversations": mailbox_lookup.testable_conversations()})
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -164,8 +180,12 @@ class Handler(BaseHTTPRequestHandler):
                 # (apps.setup.resolve_setup) — Track B's connector recipe still
                 # has no entity (tag/user/inbox) slots of its own to resolve,
                 # only test_contact_email, which needs provenance, not lookup.
-                state = copilot.respond_structured(CLIENT, msgs, ws=WS, apps_ws=APPS_WS)
-                state["app"] = app  # scoping is a no-op today (see module docstring)
+                # `app` scopes automation_extract's connector vocab to just
+                # this app (see automation/extract.py's _vocab_block()) — no
+                # longer a no-op now that a second app (ClickUp) exists to
+                # prove the filter's shape against.
+                state = copilot.respond_structured(CLIENT, msgs, ws=WS, apps_ws=APPS_WS, app=app)
+                state["app"] = app
                 return self._send(200, state)
             except Exception as e:
                 return self._send(500, {"error": f"{type(e).__name__}: {str(e)[:300]}"})
@@ -175,6 +195,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print("Apps-panel entry -> http://127.0.0.1:8011  "
          "(GET /api/apps, GET /api/apps/<app>, POST /api/apps/<app>/chat, "
+         "GET /api/apps/<app>/testable-conversations, "
          "POST /api/apps/<app>/features/<id>/enable, "
          "POST /api/apps/<app>/features/<id>/test-create)")
     ThreadingHTTPServer(("127.0.0.1", 8011), Handler).serve_forever()

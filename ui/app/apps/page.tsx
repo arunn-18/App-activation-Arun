@@ -11,6 +11,7 @@ import {
   fetchAppCatalog,
   fetchAppNames,
   hasFeatureCard,
+  fetchTestableConversationsApp,
   hasQuestionForm,
   hasRuleCard,
   sendAppChat,
@@ -263,6 +264,9 @@ export default function AppsPanel() {
                           fieldValues
                         )
                       }
+                      fetchTestConversations={() =>
+                        fetchTestableConversationsApp(selectedApp)
+                      }
                     />
                   )}
                   {m.role === "assistant" && work[i] && hasRuleCard(work[i]) && (
@@ -342,6 +346,18 @@ function capitalize(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
+/** The message sent when a suggestion chip is clicked. Just the capability's
+ *  own name — e.g. "Create a Contact from Hiver", "Create a ClickUp task" —
+ *  not a templated "Set up: X — Y" string. A live test found that template
+ *  actively hurt classification: the router/extractor read "Set up: <name>
+ *  — <description>" as too generic/automation-shaped, misrouting real
+ *  Track A asks. Every catalog name here was already written to read as a
+ *  plausible, natural thing a user might type — that's the whole reason to
+ *  trust it verbatim instead of dressing it up. */
+function suggestionPrompt(entry: AppCapability): string {
+  return entry.name;
+}
+
 /** Every suggestion chip is derived straight from this app's own catalog —
  *  never a hand-picked example — so trying one can only ever mean trying a
  *  real App Integration capability, never an unrelated automation idea. */
@@ -353,7 +369,7 @@ function buildSuggestions(catalog: AppCatalog) {
   ];
   return all.map(({ entry }) => ({
     label: entry.name,
-    prompt: `Set up: ${entry.name} — ${entry.description}`,
+    prompt: suggestionPrompt(entry),
     blocked: entry._blocked_on.length ? entry._blocked_on : null,
   }));
 }
@@ -379,7 +395,7 @@ function CapabilitySection({
           <button
             key={e.name}
             disabled={disabled}
-            onClick={() => onTry(`Set up: ${e.name} — ${e.description}`)}
+            onClick={() => onTry(suggestionPrompt(e))}
             className="block w-full rounded-lg border border-hairline px-3 py-2 text-left transition-colors hover:border-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
           >
             <p className="text-[12.5px] font-medium text-ink">{e.name}</p>

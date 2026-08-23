@@ -446,6 +446,34 @@ export async function testCreateFeatureApp(
   return data as TestCreateResult;
 }
 
+/** capability 7's conversation picker (mailbox_lookup.testable_
+ *  conversations) — REAL mailbox conversations, most recent first, whose
+ *  sender is a known contact in the app's fixture. Shown BEFORE a write
+ *  feature's create-form (or used to preview a view feature) — never
+ *  skipped past straight into the form. */
+export interface TestableConversation {
+  id: string;
+  from: string;
+  subject: string;
+  received_at: string;
+}
+
+export async function fetchTestableConversationsAutomation(): Promise<TestableConversation[]> {
+  const res = await fetch(`${API_BASE}/api/testable-conversations`);
+  if (!res.ok) throw new Error(`testable-conversations: HTTP ${res.status}`);
+  const data = await res.json();
+  return data.conversations ?? [];
+}
+
+export async function fetchTestableConversationsApp(app: string): Promise<TestableConversation[]> {
+  const res = await fetch(
+    `${APPS_API_BASE}/api/apps/${encodeURIComponent(app)}/testable-conversations`
+  );
+  if (!res.ok) throw new Error(`apps/${app}/testable-conversations: HTTP ${res.status}`);
+  const data = await res.json();
+  return data.conversations ?? [];
+}
+
 export interface ProgressEvent {
   type: "progress";
   stage: "extracting" | "lookup" | "validating";

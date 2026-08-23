@@ -25,6 +25,7 @@ import {
   hasFeatureCard,
   hasQuestionForm,
   hasRuleCard,
+  fetchTestableConversationsAutomation,
   progressLabel,
   sendChatStream,
   testCreateFeatureAutomation,
@@ -493,6 +494,7 @@ export default function Playground() {
                           fieldValues
                         )
                       }
+                      fetchTestConversations={fetchTestableConversationsAutomation}
                     />
                   )}
                   {m.role === "assistant" &&

@@ -21,7 +21,16 @@ from . import schema
 
 MODEL = "gpt-4o"
 
-def _vocab_block():
+def _vocab_block(app=None):
+    """`app` (optional): when given (the Apps-panel entry point, scoped to
+    one connected app — see serve_apps.py's own SCOPING NOTE, which flagged
+    this as a TODO before there was a second app to prove it against),
+    CONNECTOR RECIPES and NATIVE APP ACTIONS list ONLY that app's entries —
+    a live test with two real apps (Salesforce, ClickUp) showed the
+    unfiltered vocab as noise that made it easier for the model to
+    misclassify which app a bare request was even about. `app=None` (the
+    general Automations copilot, "/") keeps the full unscoped list — that
+    surface legitimately builds automations for any app, or none at all."""
     lines = ["TRIGGERS:"]
     for t, desc in schema.TRIGGERS.items():
         lines.append(f"  {t} — {desc}")
@@ -30,36 +39,52 @@ def _vocab_block():
         extra = f" values={s['values']}" if s.get("values") else ""
         lines.append(f"  {p}: {', '.join(s['ops'])}{extra}")
     lines.append("AI VARIABLE TYPES (for ai_extract): " + ", ".join(schema.AI_VARIABLE_TYPES))
+    # scoped BEFORE the ACTIONS loop below, which also needs these two sets —
+    # the connector action's own `recipe`/`native_action_id` "legal values"
+    # line is generated generically from schema.ACTIONS[...]["params"][...]
+    # ["enum"] (the full, unscoped list schema.py declares); a live test
+    # caught that leak: CONNECTOR RECIPES/NATIVE APP ACTIONS further down
+    # were correctly scoped, but this earlier line still advertised every
+    # app's recipe/native-action id regardless, undermining the scoping.
+    recipes = {rid: r for rid, r in schema.RECIPES.items() if app is None or r["app"] == app}
+    natives = {nid: n for nid, n in schema.NATIVE_ACTIONS.items()
+              if app is None or n["app"] == app}
     lines.append("ACTIONS (type: params — leave a param null/[] if the user did not give it):")
     for a, s in schema.ACTIONS.items():
         params = []
         for pname, pspec in s["params"].items():
-            params.append(f"{pname}" + (f"={'|'.join(pspec['enum'])}"
-                                        if pspec.get("enum") else ""))
+            # `recipe`'s enum is schema.py's full unscoped list; native_
+            # action_id isn't in this params dict at all (it's declared only
+            # in RESPONSE_SCHEMA below) so no equivalent leak exists for it.
+            enum = list(recipes) or None if pname == "recipe" else pspec.get("enum")
+            params.append(f"{pname}" + (f"={'|'.join(enum)}" if enum else ""))
         lines.append(f"  {a}: {', '.join(params)}")
     lines.append("CONNECTOR RECIPES (legal values for the 'connector' action's `recipe` "
                  "param — this is the COMPLETE list; nothing else exists, however plausible "
                  "it sounds):")
-    for rid, r in schema.RECIPES.items():
+    for rid, r in recipes.items():
         lines.append(f"  {rid} ({r['app']}) — {r['description']}")
     lines.append("NATIVE APP ACTIONS (legal values for the 'connector' action's "
                  "`native_action_id` param — a pre-built Hiver action block, not an API "
                  "call this engine composes; this is the COMPLETE list):")
-    for nid, n in schema.NATIVE_ACTIONS.items():
+    for nid, n in natives.items():
         lines.append(f"  {nid} ({n['app']}) — {n['description']}")
-    lines.append("SALESFORCE OBJECTS available for a connector's custom_plan (see rule 19b) — "
-                 "call describe_object on one before referencing its fields, never guess a "
-                 "field name: " + ", ".join(sorted(salesforce_schema.OBJECTS)))
+    # custom_plan only ever targets Salesforce (schema.py's own "app" enum) —
+    # irrelevant noise when scoped to a different app entirely.
+    if app is None or app == "salesforce":
+        lines.append("SALESFORCE OBJECTS available for a connector's custom_plan (see rule 19b) — "
+                     "call describe_object on one before referencing its fields, never guess a "
+                     "field name: " + ", ".join(sorted(salesforce_schema.OBJECTS)))
     lines.append("UNSUPPORTED (recognize, put in unsupported_requests, never emit as actions): "
                  + "; ".join(f"{k} ({v})" for k, v in schema.UNSUPPORTED.items()))
     return "\n".join(lines)
 
 
-SYSTEM = f"""You extract Hiver AUTOMATION rule specs from a conversation (router.py has
+_SYSTEM_TEMPLATE = """You extract Hiver AUTOMATION rule specs from a conversation (router.py has
 already decided this turn is about an automation, not an app-feature setup). Output
 ONLY the JSON spec.
 
-{_vocab_block()}
+{vocab}
 
 EXTRACTION RULES:
 1. Fill a slot ONLY with information present in the USER's messages. If the user has not
@@ -239,6 +264,18 @@ EXTRACTION RULES:
    - recipe, native_action_id, and custom_plan are mutually exclusive: never
      fill more than one on the same action.
 """
+
+
+def _system_text(app=None):
+    return _SYSTEM_TEMPLATE.format(vocab=_vocab_block(app))
+
+
+# unscoped default — the general Automations copilot ("/", serve_api.py/
+# serve2.py) always extracts against this; nothing about switching
+# _vocab_block()/SYSTEM from a bare f-string to this function changes what
+# it produces for app=None (see the "exactly one single-brace expression"
+# check this refactor was verified against before landing).
+SYSTEM = _system_text()
 
 RESPONSE_SCHEMA = {
     "name": "automation_spec",
@@ -421,14 +458,15 @@ W. A workspace is connected: its tags, agents, and shared inboxes are real. BEFO
 MAX_TOOL_ROUNDS = 5
 
 
-def build_system(ws=None):
-    return SYSTEM + WORKSPACE_RULES if ws else SYSTEM
+def build_system(ws=None, app=None):
+    text = _system_text(app)
+    return text + WORKSPACE_RULES if ws else text
 
 
 _PLANNER_TOOL_NAMES = {t["function"]["name"] for t in planner.TOOLS}
 
 
-def extract(client, messages, model=MODEL, ws=None, on_event=None):
+def extract(client, messages, model=MODEL, ws=None, on_event=None, app=None):
     """messages: [{role, content}] chat history. Returns the parsed spec dict.
     Runs a bounded tool-calling loop before the final spec: planner.TOOLS
     (list_objects/describe_object) are ALWAYS available, so a connector ask
@@ -437,8 +475,11 @@ def extract(client, messages, model=MODEL, ws=None, on_event=None):
     workspace entities, so they don't depend on ws the way wsmod.TOOLS does.
     wsmod.TOOLS are added on top when ws is supplied, exactly as before.
     on_event (optional): called with progress dicts as real pipeline steps
-    happen (one per tool call) — the honest feed for UI progress."""
-    msgs = [{"role": "system", "content": build_system(ws)}] + messages
+    happen (one per tool call) — the honest feed for UI progress.
+    app (optional): scopes CONNECTOR RECIPES/NATIVE APP ACTIONS vocab to
+    just this app (see _vocab_block's own docstring) — set by the Apps
+    panel, left None everywhere else."""
+    msgs = [{"role": "system", "content": build_system(ws, app)}] + messages
     kwargs = dict(model=model, temperature=0, max_tokens=2000,
                   response_format={"type": "json_schema", "json_schema": RESPONSE_SCHEMA})
     tools = list(planner.TOOLS) + (list(wsmod.TOOLS) if ws else [])

@@ -20,6 +20,11 @@ Endpoints (CORS open to localhost dev servers):
                                  "field_values": {label: value}} -> a real
                                  (mock) created record — see
                                  copilot.test_create_feature()
+  GET  /api/testable-conversations
+                                 capability 7's conversation picker — real
+                                 mailbox conversations to test a view
+                                 feature's preview or a write feature's
+                                 create-form against
 
 The chat UI for humans stays at serve2.py (port 8001); this server returns machine
 state so a frontend can render the draft, questions, and final rule as components.
@@ -36,6 +41,7 @@ os.environ.setdefault("COPILOT_PILOT_SCOPE", "1")
 
 import connected_apps
 import copilot
+import mailbox_lookup
 import preview
 import router
 import workspace as wsmod
@@ -68,6 +74,8 @@ class Handler(BaseHTTPRequestHandler):
             # builder-vocabulary labels for UIs — single source, can't drift
             return self._send(200, {"triggers": schema.TRIGGER_LABELS,
                                     "properties": schema.PROPERTY_LABELS})
+        if self.path == "/api/testable-conversations":
+            return self._send(200, {"conversations": mailbox_lookup.testable_conversations()})
         return self._send(404, {"error": "not found"})
 
     def _read_messages(self):

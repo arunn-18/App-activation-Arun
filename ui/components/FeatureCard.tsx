@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import type { FeatureRequest, TestCreateResult } from "@/lib/api";
+import { useEffect, useState } from "react";
+import type { FeatureRequest, TestableConversation, TestCreateResult } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
 const STATUS_STYLE: Record<FeatureRequest["status"], string> = {
@@ -34,6 +34,7 @@ const FEATURE_NAMES: Record<string, string> = {
 export default function FeatureCard({
   featureRequest,
   onTestCreate,
+  fetchTestConversations,
 }: {
   featureRequest: FeatureRequest;
   /** capability 7 for a WRITE feature — submits the test form's values and
@@ -41,6 +42,10 @@ export default function FeatureCard({
    *  that doesn't wire up the endpoint; the form simply doesn't render then,
    *  same "don't offer what isn't there" stance as everything else here. */
   onTestCreate?: (fieldValues: Record<string, string>) => Promise<TestCreateResult>;
+  /** capability 7's conversation picker — real mailbox conversations to
+   *  choose from BEFORE the create-form appears (never skipped past
+   *  straight into the form; a live test asked for exactly this order). */
+  fetchTestConversations?: () => Promise<TestableConversation[]>;
 }) {
   const feat = featureRequest.feature;
   const progress = featureRequest.progress ?? {};
@@ -112,7 +117,11 @@ export default function FeatureCard({
       )}
 
       {featureRequest.status === "complete" && feat?.kind === "write" && onTestCreate && (
-        <WriteTestForm fieldsByObject={fieldsByObject} onTestCreate={onTestCreate} />
+        <WriteTestForm
+          fieldsByObject={fieldsByObject}
+          onTestCreate={onTestCreate}
+          fetchTestConversations={fetchTestConversations}
+        />
       )}
 
       {featureRequest.status === "invalid" && featureRequest.errors.length > 0 && (
@@ -181,22 +190,40 @@ function FeaturePreviewStrip({
  *  view feature's test shows EXISTING data (FeaturePreviewStrip above); a
  *  write feature creates something new, so testing it means actually
  *  submitting values and creating a real (mock) record — the write
- *  analogue, not a variant of the same strip. A live test found the gap
- *  this closes: the old text-only nudge promised something with no form
- *  and no endpoint behind it at all. */
+ *  analogue, not a variant of the same strip.
+ *
+ *  TWO STEPS, in order — a live test explicitly asked for the conversation
+ *  picker to come FIRST, matching the real Hiver Salesforce panel (open a
+ *  conversation, THEN its create-object form appears), not a bare form with
+ *  no conversation context at all:
+ *    1. pick a real conversation (mailbox_lookup.testable_conversations,
+ *       the SAME real-conversation set a view feature's preview offers)
+ *    2. only then does the field-value form for THAT conversation appear */
 function WriteTestForm({
   fieldsByObject,
   onTestCreate,
+  fetchTestConversations,
 }: {
   fieldsByObject: Record<string, string[]>;
   onTestCreate: (fieldValues: Record<string, string>) => Promise<TestCreateResult>;
+  fetchTestConversations?: () => Promise<TestableConversation[]>;
 }) {
   const object = Object.keys(fieldsByObject)[0];
   const labels = fieldsByObject[object] ?? [];
+  const [conversations, setConversations] = useState<TestableConversation[] | null>(null);
+  const [conversationsError, setConversationsError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<TestableConversation | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TestCreateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!fetchTestConversations) return;
+    fetchTestConversations()
+      .then(setConversations)
+      .catch((e) => setConversationsError(e instanceof Error ? e.message : String(e)));
+  }, [fetchTestConversations]);
 
   if (!object || labels.length === 0) return null;
 
@@ -213,11 +240,59 @@ function WriteTestForm({
     }
   };
 
+  // step 1: no picker wired up at all (a page that hasn't fetched it) — fall
+  // back to the form directly, same graceful "don't offer what isn't there"
+  // stance as the rest of this component. Otherwise a conversation MUST be
+  // picked before the form shows.
+  if (fetchTestConversations && !selected) {
+    return (
+      <div className="space-y-2 border-t border-hairline px-4 py-3">
+        <p className="text-[12.5px] font-medium text-ink">
+          Test it — pick a real conversation to open the create-{object} form in:
+        </p>
+        {conversationsError && (
+          <p className="text-[12px] text-destructive">{conversationsError}</p>
+        )}
+        {conversations === null && !conversationsError && (
+          <p className="text-[12px] text-muted-foreground">Loading conversations…</p>
+        )}
+        {conversations?.length === 0 && (
+          <p className="text-[12px] text-muted-foreground">
+            No real conversations to test with yet.
+          </p>
+        )}
+        <div className="space-y-1.5">
+          {conversations?.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setSelected(c)}
+              className="block w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-left text-[12.5px] transition-colors hover:border-ink-soft"
+            >
+              <span className="font-medium text-ink">{c.from}</span>{" "}
+              <span className="text-ink-soft">— {c.subject}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // step 2: the form, now scoped to the picked conversation.
   return (
     <div className="space-y-2.5 border-t border-hairline px-4 py-3">
       <p className="text-[12.5px] font-medium text-ink">
-        Test it — create a real {object} from these values:
+        {selected
+          ? <>Creating a {object} for <span className="font-mono text-[12px]">{selected.from}</span> ({selected.subject}):</>
+          : `Test it — create a real ${object} from these values:`}
       </p>
+      {selected && (
+        <button
+          onClick={() => setSelected(null)}
+          className="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
+        >
+          Pick a different conversation
+        </button>
+      )}
       <form onSubmit={submit} className="space-y-2">
         {labels.map((label) => (
           <div key={label} className="flex items-center gap-2">

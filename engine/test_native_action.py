@@ -139,6 +139,37 @@ def run():
           "chain-shaped 'final' key this result doesn't have",
           test_run_line is not None and "clickup.com" in test_run_line)
 
+    # ---- Apps-panel scoping: vocab must not leak across apps -----------------
+    # A live test surfaced this: the Apps panel's own module docstring
+    # (serve_apps.py) flagged app-scoping as a "no-op until a second app
+    # exists" TODO back when there was only one recipe (Salesforce).
+    # clickup_create_task is that second app — this proves the vocab a
+    # scoped extraction call actually sees stays within its own app.
+    from automation import extract as automation_extract
+
+    clickup_vocab = automation_extract._vocab_block("clickup")
+    check("clickup-scoped vocab lists its own native action",
+          "clickup_create_task" in clickup_vocab)
+    check("clickup-scoped vocab never mentions the Salesforce recipe id "
+          "(the ACTIONS line's `recipe=` enum, not just the CONNECTOR "
+          "RECIPES listing further down)",
+          "salesforce_account_csm_autoassign" not in clickup_vocab)
+    check("clickup-scoped vocab drops the Salesforce-only custom_plan "
+          "SALESFORCE OBJECTS line entirely -- irrelevant noise for an app "
+          "with no Salesforce object model",
+          "SALESFORCE OBJECTS" not in clickup_vocab)
+
+    salesforce_vocab = automation_extract._vocab_block("salesforce")
+    check("salesforce-scoped vocab never mentions ClickUp's native action",
+          "clickup" not in salesforce_vocab.lower())
+
+    unscoped_vocab = automation_extract._vocab_block(None)
+    check("unscoped vocab (app=None, the general Automations copilot) keeps "
+          "BOTH apps -- that surface legitimately builds automations for "
+          "any app or none at all",
+          "clickup_create_task" in unscoped_vocab
+          and "salesforce_account_csm_autoassign" in unscoped_vocab)
+
     print(f"native action unit cases: {units - fails}/{units} passed")
     print("PASS" if fails == 0 else f"FAIL ({fails})")
     return fails == 0

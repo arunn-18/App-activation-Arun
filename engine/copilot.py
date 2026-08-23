@@ -522,13 +522,18 @@ def _mapping_explanation(spec, feature_result):
     return None
 
 
-def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
+def _turn(client, messages, model, ws, apps_ws=None, on_event=None, app=None):
     """Shared per-turn pipeline: router decides the track, then that track's
     OWN extract -> resolve pipeline runs. Returns (spec, result) where
     result["feature_request"] is set (non-None) for an app_setup turn and
     None for an automation turn — respond()/respond_structured() branch on
     that, unchanged from before this file's tracks were split into
-    packages."""
+    packages.
+
+    `app` (optional): set only by the Apps panel (serve_apps.py), scoping
+    automation_extract's CONNECTOR RECIPES/NATIVE APP ACTIONS vocab to just
+    this app — see automation/extract.py's _vocab_block() docstring for why.
+    None everywhere else (the general Automations copilot stays unscoped)."""
     if on_event:
         on_event({"stage": "routing"})
     route = router.classify(client, messages, model)
@@ -584,7 +589,8 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
             on_event({"stage": "extracting", "track": "automation"})
         user_msgs = [m["content"] for m in messages if m["role"] == "user"]
         convo_text = "\n".join(user_msgs)
-        spec = automation_extract.extract(client, messages, model, ws=ws, on_event=on_event)
+        spec = automation_extract.extract(client, messages, model, ws=ws, on_event=on_event,
+                                          app=app)
         spec["capability_question"] = route.get("capability_question")
         spec["no_intent"] = route.get("no_intent")
         if on_event:
@@ -613,11 +619,12 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
 
 
 def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
-                       on_event=None):
+                       on_event=None, app=None):
     """One turn, machine-readable: everything a UI needs to render the state.
-    Same pipeline as respond(); returns a dict instead of prose."""
+    Same pipeline as respond(); returns a dict instead of prose. `app`: see
+    _turn()'s own docstring — Apps-panel scoping, None elsewhere."""
     spec, result = _turn(client, messages, model or automation_extract.MODEL, ws,
-                        apps_ws=apps_ws, on_event=on_event)
+                        apps_ws=apps_ws, on_event=on_event, app=app)
     complete = result["status"] == "complete"
     feature_result = result.get("feature_request")
     # capability 7 for Track A: a courtesy nudge once the feature is fully
@@ -687,12 +694,13 @@ def _render_test_run(test_run):
     return f"Test run: couldn't complete — {test_run.get('reason', 'unknown error')}."
 
 
-def respond(client, messages, model=None, ws=None, apps_ws=None):
+def respond(client, messages, model=None, ws=None, apps_ws=None, app=None):
     """One turn. messages = full chat history [{role, content}]. Returns reply text.
     With a workspace, extraction may use lookup tools and the validator re-verifies
-    every resolution against the user's own words."""
+    every resolution against the user's own words. `app`: see _turn()'s own
+    docstring — Apps-panel scoping, None elsewhere."""
     spec, result = _turn(client, messages, model or automation_extract.MODEL, ws,
-                        apps_ws=apps_ws)
+                        apps_ws=apps_ws, app=app)
 
     feature_result = result.get("feature_request")
     # the mapping explanation (see _mapping_explanation) — the "identify the
