@@ -510,6 +510,29 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None):
         }
         if spec.get("closing") and _contributed_app_setup(spec, last_user):
             spec["closing"] = False
+        if feature_result is None:
+            # No Track A feature actually matched this app_setup-track turn
+            # (a bare capability question, a gibberish message, or an
+            # app-setup-sounding ask with no catalog match) — apps_extract's
+            # spec has NO trigger/actions/condition_groups at all (see
+            # apps/extract.py's RESPONSE_SCHEMA), so respond_structured()
+            # below would report "track": "automation" (since feature_result
+            # is None) while handing the UI a spec missing the very fields
+            # RuleCard assumes exist, crashing on `spec.actions.length`. This
+            # is exactly the "one track's shape leaking into the other's
+            # consumer" bug apps/ and automation/ were split to prevent —
+            # normalize to the SAME empty shape a fresh automation turn
+            # already has, preserving only the read-only classifications and
+            # honest unmappable/closing signals.
+            spec = {
+                "intent_summary": spec.get("intent_summary", ""),
+                "trigger": None, "scope_confirmed": False, "condition_groups": [],
+                "actions": [], "ai_extract": None, "unsupported_requests": [],
+                "closing": spec.get("closing", False),
+                "unmappable": spec.get("unmappable") or [],
+                "capability_question": spec.get("capability_question"),
+                "no_intent": spec.get("no_intent"),
+            }
     else:
         if on_event:
             on_event({"stage": "extracting", "track": "automation"})

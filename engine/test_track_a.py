@@ -284,6 +284,55 @@ def run():
         router.classify = original_classify
         extract.extract = original_extract
 
+    # ---- app_setup track with NO feature match must normalize its spec ------
+    # A real live-testing crash: a capability question ("what's possible with
+    # Salesforce?") on an app_setup-routed turn produced feature=None from
+    # apps.extract.extract() — apps_extract's own spec shape has no trigger/
+    # actions/condition_groups at all (see apps/extract.py's RESPONSE_SCHEMA).
+    # respond_structured() reported "track": "automation" (since feature_
+    # request is None) while handing back that apps-shaped spec verbatim, so
+    # the UI's RuleCard crashed on `spec.actions.length` (undefined). Pin the
+    # fix: an unmatched app_setup turn must get the SAME empty automation
+    # shape a genuinely-empty automation turn already has.
+    original_classify = router.classify
+    original_extract = extract.extract
+
+    def fake_capability_question_classify(client, messages, model=None):
+        return {"intent_summary": "test", "track": "app_setup",
+                "capability_question": "what's possible with salesforce",
+                "no_intent": None}
+
+    def fake_no_match_extract(client, messages, model=None):
+        return {"intent_summary": "test", "feature": None, "connect_requested": None,
+                "objects": None, "account_fields": None, "contact_fields": None,
+                "inboxes": None, "test_contact_email": None, "closing": False,
+                "unmappable": []}
+
+    router.classify = fake_capability_question_classify
+    extract.extract = fake_no_match_extract
+    try:
+        msgs = [{"role": "user", "content": "what's possible with salesforce?"}]
+        s = copilot.respond_structured(None, msgs, apps_ws=_connected_ws())
+        check("unmatched app_setup turn: labeled automation (no feature to show)",
+              s["track"] == "automation" and s["feature_request"] is None)
+        check("unmatched app_setup turn: spec normalized to the SAME empty shape "
+              "a fresh automation turn has -- no leaked apps-only fields",
+              s["spec"]["actions"] == [] and s["spec"]["trigger"] is None
+              and s["spec"]["condition_groups"] == [])
+        check("unmatched app_setup turn: the capability question still gets answered",
+              s["capability_answer"] and "Salesforce" in s["capability_answer"])
+        # the actual crash site: RuleCard.tsx unconditionally reads
+        # spec.actions.length -- this must be a real list, not None/missing
+        check("unmatched app_setup turn: spec.actions.length is computable "
+              "(this is exactly what crashed the UI before this fix)",
+              len(s["spec"]["actions"]) == 0)
+        prose = copilot.respond(None, msgs, apps_ws=_connected_ws())
+        check("prose path handles the same turn without raising",
+              isinstance(prose, str) and len(prose) > 0)
+    finally:
+        router.classify = original_classify
+        extract.extract = original_extract
+
     print(f"track A unit cases: {units - fails}/{units} passed")
     print("PASS" if fails == 0 else f"FAIL ({fails})")
     return fails == 0
