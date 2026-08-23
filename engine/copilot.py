@@ -551,10 +551,24 @@ def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
                         apps_ws=apps_ws, on_event=on_event)
     complete = result["status"] == "complete"
     feature_result = result.get("feature_request")
+    # capability 7 for Track A: a courtesy nudge once the feature is fully
+    # enabled but nobody's named a contact to preview it against yet — the
+    # SAME text respond() has always shown; without this field a structured
+    # (UI) consumer had no way to surface it, even though the mailbox/fixture
+    # data backing it was there the whole time (a real gap, not a design
+    # choice: capability 7 was wired into respond()'s prose but never into
+    # this dict, so the browser UI could never show it).
+    feature_test_suggestion = (
+        _test_conversation_suggestions()
+        if (feature_result is not None and feature_result["status"] == "complete"
+            and not feature_result.get("preview"))
+        else None
+    )
     return {
         "status": result["status"],
         "track": "feature" if feature_result is not None else "automation",
         "feature_request": feature_result,
+        "feature_test_suggestion": feature_test_suggestion,
         "test_run": connector_test_run(spec) if complete and feature_result is None else None,
         "capability_answer": (docent.answer(spec["capability_question"])
                               if spec.get("capability_question") else None),

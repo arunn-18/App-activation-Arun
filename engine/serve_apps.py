@@ -69,9 +69,19 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        # CORS open to localhost dev servers — same as serve_api.py. Missing
+        # this meant a browser-based UI (the whole point of this endpoint)
+        # could never actually reach it: the request would just fail with a
+        # CORS error, not a visible API error, before this fix.
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        self._send(204, {})
 
     def do_GET(self):
         if self.path == "/api/apps":

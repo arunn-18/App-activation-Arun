@@ -7,26 +7,33 @@ schema.py, so every capability named is one the engine can actually build, and
 what's out of scope is stated from the UNSUPPORTED list rather than omitted or
 invented. Question turns are read-only: the draft rule is not touched.
 
-Lane line: automation vocabulary only (triggers, conditions, actions, AI
-variables, limits). Anything else gets an honest redirect.
+Lane line: automation vocabulary (triggers, conditions, actions, AI variables,
+limits), PLUS Track A app features (apps/schema.py's FEATURES) wherever a
+topic names an app — "what's possible with Salesforce" spans BOTH tracks
+(view/manage records AND connector automations), so the answer must too, or
+half of what's actually built goes unmentioned. Anything else gets an honest
+redirect.
 """
 import re
 
+from apps import schema as apps_schema
 from automation import schema
 
 _OVERVIEW = (
-    "Here's the surface I can build on: a rule fires on one trigger (new "
-    "inbound/outbound conversations, incoming replies, outgoing email, or a "
-    "conversation moved into the inbox), filters on conditions (sender/"
-    "recipient addresses and domains, subject and body keywords, the "
-    "conversation's current tags/assignee/status, day received, or an "
-    "AI-extracted variable), then runs actions — tag or "
-    "untag, assign (one person or round-robin), set status, add a note, send "
-    "a reply or notification, add to or remove from a shared inbox, or talk to "
-    "another app — a native action block (like creating a ClickUp task), a "
-    "ready-made Salesforce recipe, or a Salesforce lookup composed on the fly "
-    "for asks that fit the same shape. Ask about "
-    "any of these and I'll go deeper."
+    "Two kinds of thing I can set up. App features — enable once per "
+    "workspace, no trigger involved: " + "; ".join(
+        f"{f['name']} ({f['app'].title()})" for f in apps_schema.FEATURES.values())
+    + ". And automations — a rule fires on one trigger (new inbound/outbound "
+    "conversations, incoming replies, outgoing email, or a conversation moved "
+    "into the inbox), filters on conditions (sender/recipient addresses and "
+    "domains, subject and body keywords, the conversation's current tags/"
+    "assignee/status, day received, or an AI-extracted variable), then runs "
+    "actions — tag or untag, assign (one person or round-robin), set status, "
+    "add a note, send a reply or notification, add to or remove from a shared "
+    "inbox, or talk to another app — a native action block (like creating a "
+    "ClickUp task), a ready-made Salesforce recipe, or a Salesforce lookup "
+    "composed on the fly for asks that fit the same shape. Ask about any of "
+    "these and I'll go deeper."
 )
 
 # keyword routes -> composed answers. Every claim traces to schema.py.
@@ -77,7 +84,13 @@ _TOPICS = [
      "the set."),
     (("integrat", "connector", "salesforce", "hubspot", "clickup", "custom field",
       "custom object", "approval", "sla", "webhook", "api"),
-     "Three ways I can talk to another app, in order of how much is already built: "
+     "Salesforce integration splits into two things, both live today. "
+     "First, App features an admin enables once per workspace — no trigger, "
+     "no per-conversation automation, just config: " + "; ".join(
+         f"{f['name']} — {f['description']}" for f in apps_schema.FEATURES.values()
+         if f["app"] == "salesforce")
+     + " Second, automations that react as conversations come in — three ways "
+     "I can talk to another app there, in order of how much is already built: "
      "a native action block — " + ", ".join(f"{n['name']} ({n['app']})"
                                             for n in schema.NATIVE_ACTIONS.values())
      + " — is Hiver's own pre-built integration, no lookups involved. A ready-made "

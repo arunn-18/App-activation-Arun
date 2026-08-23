@@ -7,6 +7,13 @@
 // client falls back to plain /api/chat automatically).
 export const API_BASE = process.env.NEXT_PUBLIC_COPILOT_API ?? "";
 
+// The Apps panel (ui/app/apps/page.tsx) talks to a DIFFERENT server —
+// engine/serve_apps.py, scoped by app, not the general Automations
+// copilot's serve_api.py — so it needs its own base URL, not API_BASE.
+// Start it with:
+//   cd <v2-repo>/engine && <venv-python> serve_apps.py    -> http://127.0.0.1:8011
+export const APPS_API_BASE = process.env.NEXT_PUBLIC_APPS_API ?? "";
+
 export type Role = "user" | "assistant";
 export interface ChatMessage {
   role: Role;
@@ -219,6 +226,12 @@ export interface TurnState {
   track?: "automation" | "feature";
   /** set only when track === "feature". */
   feature_request?: FeatureRequest | null;
+  /** "test on a real conversation" (capability 7) nudge for Track A: set
+   *  only once the feature is fully enabled (feature_request.status ===
+   *  "complete") AND nobody has named a contact to preview it against yet
+   *  (feature_request.preview is absent) — a courtesy pointer at real
+   *  mailbox conversations, never shown once a preview has actually run. */
+  feature_test_suggestion?: string | null;
   /** set only when the completed spec has a connector action — the real
    *  test-run result (engine/copilot.py connector_test_run), not present for
    *  any other rule type. A native-action connector (capability 5) returns
@@ -317,6 +330,64 @@ export async function sendChat(messages: ChatMessage[]): Promise<TurnState> {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error ?? `chat: HTTP ${res.status}`);
+  return data as TurnState;
+}
+
+// ---- Apps panel (engine/serve_apps.py) ------------------------------------
+// Scoped to ONE app at a time — Track A features, Track B recipes, and
+// native actions for that app ONLY. No generic (non-app) automation surface
+// exists here; that's the Automations copilot above, a deliberately
+// different product surface.
+
+/** One capability entry from GET /api/apps/<app> — a Track A feature, a
+ *  Track B recipe, or a native action, all the same shape from the UI's
+ *  point of view: something to show, and whether it's blocked right now. */
+export interface AppCapability {
+  app: string;
+  name: string;
+  description: string;
+  prerequisites: string[];
+  /** unmet prerequisite keys — empty means buildable right now. */
+  _blocked_on: string[];
+  kind?: "view" | "write"; // Track A features only
+}
+
+export interface AppCatalog {
+  app: string;
+  connected: boolean;
+  track_a_features: Record<string, AppCapability>;
+  track_b_recipes: Record<string, AppCapability>;
+  native_actions: Record<string, AppCapability>;
+}
+
+export async function fetchAppNames(): Promise<string[]> {
+  const res = await fetch(`${APPS_API_BASE}/api/apps`);
+  if (!res.ok) throw new Error(`apps: HTTP ${res.status}`);
+  const data = await res.json();
+  return data.apps ?? [];
+}
+
+export async function fetchAppCatalog(app: string): Promise<AppCatalog> {
+  const res = await fetch(`${APPS_API_BASE}/api/apps/${encodeURIComponent(app)}`);
+  if (!res.ok) throw new Error(`apps/${app}: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Apps-panel chat — scoped to one app, no SSE (serve_apps.py's /chat is a
+ *  single synchronous call, unlike serve_api.py's /chat/stream). Returns the
+ *  SAME TurnState shape respond_structured() always has, so FeatureCard,
+ *  RuleCard, and QuestionForm all work unmodified against it. */
+export async function sendAppChat(
+  app: string,
+  messages: ChatMessage[]
+): Promise<TurnState> {
+  const res = await fetch(`${APPS_API_BASE}/api/apps/${encodeURIComponent(app)}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error ?? `apps/${app}/chat: HTTP ${res.status}`);
   return data as TurnState;
 }
 
@@ -430,8 +501,12 @@ export function assistantText(t: TurnState, lead = false): string {
     // this is just the lead-in line + (mid-setup) the one open question,
     // the questionnaire below carries the actual answer options.
     const fr = t.feature_request;
-    if (fr.status === "complete" && fr.feature)
-      return withMapping(`${fr.feature.name} is set up — review it below.`);
+    if (fr.status === "complete" && fr.feature) {
+      const line = `${fr.feature.name} is set up — review it below.`;
+      return withMapping(
+        t.feature_test_suggestion ? `${line}\n\n${t.feature_test_suggestion}` : line
+      );
+    }
     if (fr.status === "invalid")
       return withMapping("This isn't usable yet: " + fr.errors.join("; ") + ".");
     return withMapping(fr.questions.length
