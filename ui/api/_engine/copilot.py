@@ -412,6 +412,22 @@ def _render_feature_preview(preview):
     return "\n".join(lines)
 
 
+def _is_write_feature(feature_result):
+    """True when this completed Track A feature creates a NEW record
+    (kind="write", e.g. salesforce_create_contact) rather than showing
+    existing data. Used to withhold the "test on a real conversation" nudge
+    for write features — apps/setup.py already refuses to compute a preview
+    for them (there's no existing data to show), so offering the SAME
+    "try a real conversation" text a view feature gets would promise
+    something the engine has no way to follow through on: a live test found
+    this exact gap — the nudge appeared, but replying "yes, test it" (or
+    naming any real contact) just re-rendered the same completion message,
+    since nothing downstream was ever wired to act on it for a write
+    feature. Never invite an action there is no code path for."""
+    fid = (feature_result or {}).get("feature_id")
+    return apps_schema.FEATURES.get(fid, {}).get("kind") == "write"
+
+
 def _test_conversation_suggestions(limit=2):
     """A few real conversations to nudge toward trying, once a capability
     is complete but hasn't been test-run yet — the same
@@ -584,7 +600,8 @@ def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
     feature_test_suggestion = (
         _test_conversation_suggestions()
         if (feature_result is not None and feature_result["status"] == "complete"
-            and not feature_result.get("preview"))
+            and not feature_result.get("preview")
+            and not _is_write_feature(feature_result))
         else None
     )
     return {
@@ -662,7 +679,7 @@ def respond(client, messages, model=None, ws=None, apps_ws=None):
         if feature_result["status"] == "complete":
             feat = feature_result["feature"]
             lead = f"{mapping}\n\n" if mapping else ""
-            tail = ("" if feature_result.get("preview")
+            tail = ("" if feature_result.get("preview") or _is_write_feature(feature_result)
                    else "\n\n" + _test_conversation_suggestions())
             return (lead + f"{feat['name']} is set up — {feat['description']}\n\n"
                     + render_feature(feature_result) + tail).rstrip()

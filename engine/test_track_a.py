@@ -195,6 +195,18 @@ def run():
               == ["Contact Name", "Contact Phone"]
           and write_r4["feature"]["inboxes"] == ["Support"])
 
+    # A live-testing gap: the capability-7 "test on a real conversation" nudge
+    # was appearing after a write feature completed, but nothing downstream
+    # is wired to act on it (preview_feature() is deliberately never computed
+    # for a write feature -- there's no existing record to show). Replying to
+    # the nudge just re-rendered the same completion message forever. Fixed
+    # via copilot._is_write_feature() -- pin it down for both features.
+    write_wrapped = dict(write_r4, feature_id=WRITE_FEATURE_ID)
+    check("_is_write_feature() correctly flags a write-kind feature",
+          copilot._is_write_feature(write_wrapped))
+    check("_is_write_feature() correctly clears a view-kind feature",
+          not copilot._is_write_feature({"feature_id": FEATURE_ID}))
+
     # ---- edge cases -----------------------------------------------------------
     unknown = features.resolve_setup("not_a_real_feature", _setup(), connected)
     check("unknown feature id is an error, not a silent no-op / KeyError",
@@ -280,6 +292,63 @@ def run():
               schema.FEATURES[FEATURE_ID]["name"] in prose)
         check("turn 6: prose names the inbox it's enabled for, not a bare 'enabled'",
               "Support" in prose)
+        check("turn 6 (view feature, no preview run yet): DOES get the real-"
+              "conversation nudge -- there IS a code path (preview_feature) "
+              "for it to act on",
+              s6["feature_test_suggestion"] is not None
+              and "Try a real conversation" in prose)
+    finally:
+        router.classify = original_classify
+        extract.extract = original_extract
+
+    # ---- capability 7's nudge must NOT dangle for a completed WRITE feature -
+    # (see _is_write_feature()'s own comment) -- driven through the real
+    # pipeline end to end, not just the unit-level check above.
+    original_classify = router.classify
+    original_extract = extract.extract
+    write_convo_ws = _disconnected_ws()
+
+    def fake_write_extract(client, messages, model=None):
+        text = " ".join(m["content"] for m in messages if m["role"] == "user").lower()
+        setup = _setup()
+        if "connect" in text:
+            setup["connect_requested"] = True
+        if "create a contact" in text:
+            setup["objects"] = ["Contact"]
+        if "contact name" in text:
+            setup["contact_fields"] = ["Contact Name"]
+        if "support inbox" in text:
+            setup["inboxes"] = ["Support"]
+        return {"intent_summary": "test", "feature": WRITE_FEATURE_ID, "closing": False,
+                "unmappable": [], **setup}
+
+    router.classify = fake_classify
+    extract.extract = fake_write_extract
+    try:
+        msgs = [{"role": "user", "content": "let agents create a contact from Hiver"}]
+        msgs.append({"role": "assistant", "content":
+                    copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)["draft"]})
+        msgs.append({"role": "user", "content": "yes, connect salesforce"})
+        msgs.append({"role": "assistant", "content":
+                    copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)["draft"]})
+        msgs.append({"role": "user", "content": "create a contact"})
+        msgs.append({"role": "assistant", "content":
+                    copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)["draft"]})
+        msgs.append({"role": "user", "content": "contact name"})
+        msgs.append({"role": "assistant", "content":
+                    copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)["draft"]})
+        msgs.append({"role": "user", "content": "enable it for the support inbox"})
+        s_final = copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)
+        check("write feature reaches complete via the real pipeline",
+              s_final["status"] == "complete"
+              and s_final["feature_request"]["feature_id"] == WRITE_FEATURE_ID)
+        check("write feature: NO real-conversation nudge in the structured API "
+              "-- this is the exact live-testing bug (nudge shown, nothing to "
+              "act on it)",
+              s_final["feature_test_suggestion"] is None)
+        prose = copilot.respond(None, msgs, apps_ws=write_convo_ws)
+        check("write feature: prose never dangles the nudge either",
+              "Try a real conversation" not in prose)
     finally:
         router.classify = original_classify
         extract.extract = original_extract
