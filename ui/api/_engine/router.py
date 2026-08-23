@@ -64,9 +64,20 @@ cards for my shared mailbox" misclassified as an automation/connector ask):
   - VIEWING / SHOWING / DISPLAYING existing information alongside a conversation —
     "account cards", "contact details", "see the customer's info", "show me their
     Salesforce record" — is app_setup. There is no "when X, do Y" shape.
-  - CREATING, PUSHING, SYNCING, or ASSIGNING data per conversation — "log this email
-    in Salesforce", "create a case", "sync conversations", "assign to the CSM
-    automatically" — is automation, even if it mentions the same app.
+  - CREATING or WRITING a record is app_setup ONLY when it matches an APP FEATURES
+    entry above — e.g. "let agents create a Salesforce Contact from a conversation"
+    matches salesforce_create_contact. The signal is NOT the verb "create"; it's
+    whether an AGENT invokes it by hand, once enabled, on whatever conversation
+    they're looking at (app_setup) versus firing automatically "when X happens"
+    with no agent involved (automation). "Create a contact" alone, with nothing
+    else said, is app_setup if the APP FEATURES list has a matching entry — do not
+    default it to automation just because the word "create" appears.
+  - CREATING, PUSHING, SYNCING, or ASSIGNING data AUTOMATICALLY, triggered by a
+    conversation event with no agent in the loop — "log this email in Salesforce
+    whenever one arrives", "create a case for every new conversation", "sync
+    conversations", "assign to the CSM automatically" — is automation, even if it
+    mentions the same app AND even if a similarly-worded APP FEATURES entry exists.
+    The "when X happens" trigger shape is what makes it automation, not the app.
   - An app-setup-sounding ask that doesn't match any APP FEATURES entry (wrong app,
     or a real idea not built yet) is NOT app_setup either — track it as "automation"
     anyway (the automation extractor's unsupported/unmappable handling names the gap
