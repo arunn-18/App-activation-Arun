@@ -153,11 +153,40 @@ def run():
     res = validator.validate(bad_recipe, convo, apps_ws=APPS_WS)
     check("unknown recipe id is an error", res["status"] == "invalid" and res["errors"])
 
+    # An unmet prerequisite with a one-click fix (salesforce_connected) gets
+    # an ACTUAL "Connect Salesforce" question, not a dead-end error — a live
+    # test found the old error-only behavior left the admin nothing to do.
     unmet_ws = {"connected_apps": {"salesforce": {"connected": False, "prerequisites": {}}}}
     res = validator.validate(spec, convo, apps_ws=unmet_ws)
-    check("unmet prerequisites block the rule", res["status"] == "invalid")
-    check("unmet prerequisites name what's missing",
-          any("Salesforce" in e for e in res["errors"]))
+    check("unmet prerequisites ask to connect, not a dead-end error",
+          res["status"] == "needs_info" and not res["errors"])
+    connect_q = res["questions_structured"][0]
+    check("the connect question is an actual clickable choice, not free text",
+          connect_q["kind"] == "choice" and connect_q["options"] == [
+              {"label": "Connect Salesforce", "value": "connect salesforce"}])
+
+    # once connect_requested is set (the button was clicked / user said so),
+    # the app actually gets connected and the flow moves on.
+    connected_spec = {**spec, "actions": [
+        {**spec["actions"][0], "connect_requested": True}]}
+    reconnect_ws = {"connected_apps": {"salesforce": {"connected": False,
+                                                      "prerequisites": {
+                                                          "salesforce_connected": False,
+                                                          "account_team_enabled": True}}}}
+    res2 = validator.validate(connected_spec, convo, apps_ws=reconnect_ws)
+    check("connect_requested actually connects the app, moving past the gate",
+          reconnect_ws["connected_apps"]["salesforce"]["connected"] is True
+          and not any("isn't buildable" in e for e in res2["errors"]))
+
+    # a prerequisite with NO one-click fix (account_team_enabled) still gets
+    # the honest static error — never a fake "Connect" button for something
+    # that can't actually be one-click-fixed.
+    no_fix_ws = {"connected_apps": {"salesforce": {"connected": True, "prerequisites": {
+        "salesforce_connected": True, "account_team_enabled": False}}}}
+    res3 = validator.validate(spec, convo, apps_ws=no_fix_ws)
+    check("a non-fixable prerequisite gap stays an honest error, not a fake button",
+          res3["status"] == "invalid"
+          and any("Account Team" in e for e in res3["errors"]))
 
     res_no_ctx = validator.validate(spec, convo, apps_ws=None)
     check("no apps_ws context skips the prerequisite check (eval/CLI compatibility)",

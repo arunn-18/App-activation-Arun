@@ -88,11 +88,25 @@ def run():
           and any(m["slot"] == "actions[0].target_name" for m in r3["missing"]))
 
     # ---- prerequisite gating: same discipline a RECIPES entry gets ------------
+    # A live test found the old behavior (a static "must be connected" error,
+    # with nothing to click or a clear phrase to type) left the admin stuck —
+    # this must be an ACTUAL "Connect ClickUp" question, same shape Track A's
+    # own connect step already offers.
     disconnected = _disconnected_ws()
     r4 = validator.validate(spec, convo, apps_ws=disconnected)
-    check("ClickUp not connected -> invalid, names the real blocker",
-          r4["status"] == "invalid"
-          and any("ClickUp" in e for e in r4["errors"]))
+    check("ClickUp not connected -> asks to connect, not a dead-end error",
+          r4["status"] == "needs_info" and not r4["errors"]
+          and r4["questions_structured"][0]["kind"] == "choice"
+          and r4["questions_structured"][0]["options"]
+              == [{"label": "Connect ClickUp", "value": "connect clickup"}])
+
+    # connect_requested actually flips the connection and moves the flow on.
+    connect_spec = {**spec, "actions": [{**spec["actions"][0], "connect_requested": True}]}
+    fresh_disconnected = _disconnected_ws()
+    r4b = validator.validate(connect_spec, convo, apps_ws=fresh_disconnected)
+    check("connect_requested connects ClickUp for real, clearing the gate",
+          fresh_disconnected["connected_apps"]["clickup"]["connected"] is True
+          and r4b["status"] == "complete")
 
     r5 = validator.validate(spec, convo, apps_ws=None)
     check("no apps_ws context -> prerequisite check skipped, not failed",

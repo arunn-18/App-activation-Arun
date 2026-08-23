@@ -166,8 +166,12 @@ def run():
     r4 = validator.validate(_spec(OWNER_PLAN, "jordan@acme.example"),
                             "assign to the account owner, test with jordan@acme.example",
                             apps_ws=disconnected_ws)
-    check("a dynamic plan is blocked when Salesforce isn't connected",
-          r4["status"] != "complete" and r4["errors"])
+    check("a dynamic plan is blocked when Salesforce isn't connected -- with "
+          "an actual Connect Salesforce question, not a dead-end error",
+          r4["status"] == "needs_info" and not r4["errors"]
+          and r4["questions_structured"][0]["kind"] == "choice"
+          and r4["questions_structured"][0]["options"]
+              == [{"label": "Connect Salesforce", "value": "connect salesforce"}])
 
     # ---- neither recipe nor a valid custom_plan: the original fallback question
     empty_action_spec = _spec(None, "jordan@acme.example")

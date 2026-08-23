@@ -263,6 +263,11 @@ EXTRACTION RULES:
      plausible is far worse than an honestly declared gap.
    - recipe, native_action_id, and custom_plan are mutually exclusive: never
      fill more than one on the same action.
+19c. connect_requested (on a connector action): true the moment the user agrees
+   to connect that action's app (answers "yes"/"connect" to a connect prompt,
+   or says "connect salesforce"/"connect clickup" unprompted). Keep it true
+   for the rest of the conversation once said — the same persistence rule
+   apps/extract.py's own connect_requested already follows for Track A.
 """
 
 
@@ -320,6 +325,12 @@ RESPONSE_SCHEMA = {
                         "body_hint": {"type": ["string", "null"]},
                         "recipe": {"type": ["string", "null"],
                                   "enum": list(schema.RECIPES) + [None]},
+                        # true the moment the user agrees to connect this
+                        # action's app (rule 19c) — without this there was no
+                        # way to ever satisfy a connector's prerequisite
+                        # check from chat, only a static "not connected" dead
+                        # end (a live test with ClickUp surfaced the gap).
+                        "connect_requested": {"type": ["boolean", "null"]},
                         "test_contact_email": {"type": ["string", "null"]},
                         # Native app action (rule 19a) — Hiver's own pre-built
                         # action block, the mechanism to prefer over custom_plan
@@ -396,8 +407,9 @@ RESPONSE_SCHEMA = {
                     "required": ["type", "tags", "target", "targets", "status_value",
                                  "distribution", "content", "pinned",
                                  "email_enabled", "inbox", "body_hint",
-                                 "recipe", "test_contact_email", "native_action_id",
-                                 "target_name", "title_hint", "custom_plan"],
+                                 "recipe", "connect_requested", "test_contact_email",
+                                 "native_action_id", "target_name", "title_hint",
+                                 "custom_plan"],
                 },
             },
             "ai_extract": {

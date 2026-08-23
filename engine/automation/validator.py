@@ -32,6 +32,51 @@ ENTITY_OTHER_HINT = {"tag": "A different tag", "user": "Someone else",
                      "inbox": "A different inbox"}
 
 
+def _connect_question(ai, name, action_key):
+    """A connector action blocked on an unmet, ONE-CLICK-fixable prerequisite
+    gets an ACTUAL 'Connect X' button — the same shape apps/setup.py's own
+    Track A connect step already offers (connected_apps.PREREQUISITE_
+    ACTIONS is shared infrastructure for exactly this) — never just a
+    static 'not connected' dead end. A live test surfaced this gap: a
+    ClickUp native action correctly reported "must be connected" but gave
+    the admin nothing to click or a clear phrase to type."""
+    fix = connected_apps.PREREQUISITE_ACTIONS[action_key]
+    return {"slot": f"actions[{ai}].connect_requested",
+            "question": f"'{name}' needs {connected_apps.PREREQUISITE_LABELS[action_key]} "
+                        "first. Connect it now?",
+            "kind": "choice",
+            "options": [{"label": fix["label"], "value": fix["phrase"]}],
+            "multiple": False, "allow_other": False, "other_hint": ""}
+
+
+def _check_connector_prerequisites(apps_ws, action, ai, name, app, prerequisite_keys,
+                                   errors, missing):
+    """Shared by the recipe and native-action mechanisms (both re-verify
+    prerequisites the identical way): connect the app if the user just
+    agreed to (connect_requested — rule 19c), re-check, and either surface
+    an ACTUAL 'Connect X' question when a one-click fix exists or an honest
+    static error when it doesn't (e.g. account_team_enabled has no mocked
+    'enable Account Team' action — assumed already configured Salesforce-
+    side, same stance apps/setup.py's own connect step takes for a
+    non-fixable gate). Returns True when the action is still blocked this
+    turn (caller should skip its remaining per-mechanism checks — connect
+    first, ask the rest next turn, one thing at a time)."""
+    if apps_ws is None:
+        return False
+    if action.get("connect_requested"):
+        connected_apps.connect(apps_ws, app)
+    unmet = connected_apps.prerequisites_met(apps_ws, app, prerequisite_keys)
+    if not unmet:
+        return False
+    fix_key = next((p for p in unmet if p in connected_apps.PREREQUISITE_ACTIONS), None)
+    if fix_key is None:
+        labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
+        errors.append(f"action {ai + 1}: '{name}' isn't buildable yet — " + "; ".join(labels))
+    else:
+        missing.append(_connect_question(ai, name, fix_key))
+    return True
+
+
 def _test_email_question(ai):
     """The test_contact_email question for a connector action — offered as a
     CHOICE of real mailbox conversations whose sender is a known Salesforce
@@ -620,26 +665,19 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
         plan = action.get("custom_plan")
 
         if recipe is not None:
-            if apps_ws is not None:
-                unmet = connected_apps.prerequisites_met(apps_ws, recipe["app"],
-                                                         recipe["prerequisites"])
-                if unmet:
-                    labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
-                    errors.append(f"action {ai + 1}: '{recipe['name']}' isn't buildable "
-                                  "yet — " + "; ".join(labels))
+            if _check_connector_prerequisites(apps_ws, action, ai, recipe["name"],
+                                              recipe["app"], recipe["prerequisites"],
+                                              errors, missing):
+                continue
             if not action.get("test_contact_email"):
                 missing.append(_test_email_question(ai))
             continue
 
         if native is not None:
-            if apps_ws is not None:
-                unmet = connected_apps.prerequisites_met(apps_ws, native["app"],
-                                                         native["prerequisites"])
-                if unmet:
-                    labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
-                    errors.append(f"action {ai + 1}: '{native['name']}' isn't buildable "
-                                  "yet — " + "; ".join(labels))
-                    continue
+            if _check_connector_prerequisites(apps_ws, action, ai, native["name"],
+                                              native["app"], native["prerequisites"],
+                                              errors, missing):
+                continue
             needs_param = False
             for pname in ("target_name", "title_hint"):
                 if not action.get(pname):
@@ -662,14 +700,10 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
                 errors.append(f"action {ai + 1}: this connector plan isn't safe to run — "
                               + "; ".join(plan_errors))
                 continue
-            if apps_ws is not None:
-                unmet = connected_apps.prerequisites_met(
-                    apps_ws, plan.get("app", "salesforce"), ["salesforce_connected"])
-                if unmet:
-                    labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
-                    errors.append(f"action {ai + 1}: this connector plan isn't buildable "
-                                  "yet — " + "; ".join(labels))
-                    continue
+            if _check_connector_prerequisites(apps_ws, action, ai, "this connector plan",
+                                              plan.get("app", "salesforce"),
+                                              ["salesforce_connected"], errors, missing):
+                continue
             test_email = action.get("test_contact_email")
             if not test_email:
                 missing.append(_test_email_question(ai))

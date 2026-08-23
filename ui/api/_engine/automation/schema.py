@@ -343,6 +343,15 @@ ACTIONS = {
                               "enum": list(RECIPES),
                               "enum_labels": {rid: r["name"] for rid, r in RECIPES.items()},
                               "question": "Which app automation should this run?"},
+                   # true the moment the user agrees to connect the recipe's/
+                   # native action's app — the automation-track analogue of
+                   # apps/extract.py's own connect_requested (Track A). A
+                   # live test surfaced the gap this closes: without it,
+                   # validator.py's connector block had a prerequisite CHECK
+                   # but no way to ever satisfy it from chat, only a static
+                   # "not connected yet" error with no path forward.
+                   "connect_requested": {"required": False, "provenance": False,
+                                        "question": "Connect it now?"},
                    # required=False here too: a native action (native_action_id)
                    # doesn't need a test contact at all — there's no CRM lookup
                    # to prove, just target_name/title_hint. automation/
