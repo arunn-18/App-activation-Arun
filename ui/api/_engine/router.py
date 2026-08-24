@@ -27,6 +27,7 @@ import json
 from pathlib import Path
 
 from apps import schema as apps_schema
+from automation import schema as automation_schema
 
 MODEL = "gpt-4o"
 
@@ -37,6 +38,23 @@ def _vocab_block():
              "these is NOT app_setup either — see the disambiguation rule below):"]
     for fid, f in apps_schema.FEATURES.items():
         lines.append(f"  {fid} ({f['app']}) — {f['description']}")
+    # Track B's own vocabulary, listed here too — NOT so this module can fill
+    # a recipe/native_action_id (it never does; that's automation/extract.py's
+    # job), but so the classifier can tell the two tracks' entries APART when
+    # they cover the same app with similar-sounding wording (e.g. ClickUp has
+    # BOTH an APP FEATURES entry, a by-hand Track A action, AND a
+    # NATIVE_ACTIONS entry, an automatic Track B one — see the disambiguation
+    # rule below). Missing this was a real bug: before ClickUp had an APP
+    # FEATURES entry, nothing could collide; adding one made "create a
+    # ClickUp task" match APP FEATURES by wording alone, with no visibility
+    # into the Track B entry it was actually supposed to route to.
+    lines.append("CONNECTOR AUTOMATIONS (Track B — RECIPES and NATIVE_ACTIONS; matching "
+                 "one of these BY NAME is automation, even when an APP FEATURES entry "
+                 "above covers the same app with similar-sounding wording):")
+    for rid, r in automation_schema.RECIPES.items():
+        lines.append(f"  {rid} ({r['app']}) — \"{r['name']}\": {r['description']}")
+    for nid, n in automation_schema.NATIVE_ACTIONS.items():
+        lines.append(f"  {nid} ({n['app']}) — \"{n['name']}\": {n['description']}")
     return "\n".join(lines)
 
 
@@ -78,6 +96,17 @@ cards for my shared mailbox" misclassified as an automation/connector ask):
     conversations", "assign to the CSM automatically" — is automation, even if it
     mentions the same app AND even if a similarly-worded APP FEATURES entry exists.
     The "when X happens" trigger shape is what makes it automation, not the app.
+  - When a phrase could plausibly name EITHER an APP FEATURES entry (Track A) or a
+    CONNECTOR AUTOMATIONS entry (Track B) for the SAME app — e.g. ClickUp has both
+    clickup_create_task_from_hiver ("Create a Task from Hiver", Track A — an agent
+    fills in a form once enabled, by hand, on whatever conversation they're looking
+    at) and clickup_create_task ("Create a ClickUp task", Track B NATIVE_ACTIONS — an
+    automation fires it on a trigger, no agent involved) — match the phrase against
+    BOTH lists by name/wording, not just APP FEATURES. A message naming or describing
+    the Track B entry ("Create a ClickUp task", or any "when X happens, create a
+    ClickUp task" framing) is automation, even though an APP FEATURES entry for the
+    same app also exists. Only route to app_setup when the phrase actually matches
+    the APP FEATURES entry's own by-hand framing.
   - An app-setup-sounding ask that doesn't match any APP FEATURES entry (wrong app,
     or a real idea not built yet) is NOT app_setup either — track it as "automation"
     anyway (the automation extractor's unsupported/unmappable handling names the gap
