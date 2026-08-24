@@ -167,6 +167,46 @@ def run():
           not any(q["slot"] == "feature_request_offer" for q in s5["questions_structured"])
           and s5["feature_request_offer"] is None)
 
+    # ---- a bare capability question must NEVER trigger the offer -----------
+    # A live test surfaced this: "what all capabilities does ClickUp
+    # integration provide?" has no rule content, so the extractor puts the
+    # QUESTION ITSELF into `unmappable` (expected extractor behavior, not a
+    # real product gap) -- docent.py already answers it in full on the same
+    # turn, so offering to "log it as a feature request" on top of an
+    # already-answered question was confusing, not a courtesy.
+    def _fake_capability_question_extract(client, messages, model=None, ws=None,
+                                          on_event=None, app=None):
+        return {"trigger": None, "scope_confirmed": None, "condition_groups": [], "actions": [],
+                "ai_extract": None, "unsupported_requests": [], "closing": False,
+                "capability_question": None, "no_intent": None,
+                "unmappable": [{"request": "What all capabilities does Clickup Integration in Hiver provide?",
+                                "why": "This is a question, not a rule specification."}],
+                "intent_summary": "t", "enabled_inboxes": None,
+                "feature_request_requested": None}
+
+    def _fake_classify_capability_question(client, messages, model=None):
+        return {"intent_summary": "t", "track": "automation",
+                "capability_question": "clickup integration capabilities", "no_intent": None}
+
+    feature_requests.reset()
+    oc, oae = router.classify, automation_extract.extract
+    router.classify = _fake_classify_capability_question
+    automation_extract.extract = _fake_capability_question_extract
+    try:
+        s6 = copilot.respond_structured(
+            None, [{"role": "user",
+                   "content": "What all capabilities does Clickup Integration in Hiver provide?"}],
+            app="clickup")
+    finally:
+        router.classify, automation_extract.extract = oc, oae
+    check("a capability question landing in `unmappable` must NOT trigger "
+          "the feature-request offer -- it was already answered this turn",
+          s6["capability_answer"] is not None
+          and s6["unmappable"]  # the pre-existing exclusion note is unrelated and unchanged
+          and s6["feature_request_offer"] is None
+          and not any(q["slot"] == "feature_request_offer" for q in s6["questions_structured"])
+          and feature_requests.all_requests() == [])
+
     # ---- self-serve remediation: a non-one-click prerequisite says HOW -----
     check("connected_apps.remediation_for names a real prerequisite's fix",
           connected_apps.remediation_for("account_team_enabled") is not None

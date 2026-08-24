@@ -549,6 +549,18 @@ def _apply_feature_request_offer(spec, result, app, track):
     unmappable = result.get("unmappable") or []
     if not unmappable:
         return None
+    if spec.get("capability_question"):
+        # A live test found this: a bare capability question with no rule
+        # content ("what all capabilities does ClickUp integration provide?")
+        # has nothing else to extract from, so the extractor puts the
+        # QUESTION ITSELF into `unmappable` — that's expected extractor
+        # behavior, not a real product gap. docent.py already answers it in
+        # full on this same turn; offering to "log it as a feature request"
+        # on top of an already-answered question is confusing, not a
+        # courtesy. Same read-only stance capability_question already gets
+        # everywhere else in this function's neighborhood (closing is
+        # suppressed the same way, a few lines below in _turn()).
+        return None
     answered = spec.get("feature_request_requested")
     if answered is None:
         result.setdefault("questions_structured", []).append(_feature_request_question())
