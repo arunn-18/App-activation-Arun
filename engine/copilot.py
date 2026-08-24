@@ -406,6 +406,29 @@ def _empty_result(feature_result):
     }
 
 
+def to_final_feature_json(feature_result):
+    """Grader/eval-compatible shape for Track A -- to_final_json()'s peer for
+    the app_setup track. Added specifically so cli.py's stdout (respond()'s
+    prose reply) carries a machine-parseable result for a Track A turn the
+    same way it already does for automations; before this, an app_setup
+    conversation's fenced JSON block simply didn't exist, so nothing outside
+    the pure-code unit-test suites could ever grade Track A extraction
+    against real phrasing -- exactly the blind spot that let the router's
+    ClickUp-collision bug through undetected (see eval/apps-eval-set.jsonl).
+    `None` while incomplete, mirroring to_final_json's own null-when-
+    incomplete convention, so a run's raw_response is unambiguous either way.
+    Never read by the live product UI -- serve_apps.py talks to
+    respond_structured() instead, which already returns feature_request
+    directly; this exists purely for cli.py/serve2.py/simulate.py's
+    prose+fenced-block eval surface."""
+    if feature_result is None or feature_result.get("status") != "complete":
+        return None
+    feat = feature_result["feature"]
+    return {"track": "app_setup", "feature_id": feat["id"], "app": feat["app"],
+            "objects": feat["objects"], "fields_by_object": feat["fields_by_object"],
+            "inboxes": feat["inboxes"], "kind": feat.get("kind", "view")}
+
+
 def render_feature(feature_result):
     """apps/'s analogue of render_structure(): Track A has no trigger,
     conditions, or actions to render — just this feature's setup progress
@@ -732,18 +755,23 @@ def respond(client, messages, model=None, ws=None, apps_ws=None, app=None):
             lead = f"{mapping}\n\n" if mapping else ""
             tail = ("" if feature_result.get("preview") or _is_write_feature(feature_result)
                    else "\n\n" + _test_conversation_suggestions())
+            block = ("\n\n```json\n"
+                     + json.dumps(to_final_feature_json(feature_result), ensure_ascii=False, indent=1)
+                     + "\n```")
             return (lead + f"{feat['name']} is set up — {feat['description']}\n\n"
-                    + render_feature(feature_result) + tail).rstrip()
+                    + render_feature(feature_result) + tail + block).rstrip()
         parts = ([mapping] if mapping else []) + [render_feature(feature_result)]
         if feature_result["status"] == "invalid":
             parts.append("This isn't usable yet in this workspace: "
                          + "; ".join(feature_result.get("errors", [])) + ".")
+            parts.append("```json\nnull\n```")
             return "\n\n".join(parts)
         if feature_result.get("errors"):
             parts.append("Couldn't use that: " + "; ".join(feature_result["errors"]) + ".")
         qs = feature_result.get("questions") or []
         if qs:
             parts.append(f"To finish setting this up: {qs[0]}")
+        parts.append("```json\nnull\n```")
         return "\n\n".join(parts)
 
     is_followup = any(m["role"] == "assistant" for m in messages)
