@@ -1,6 +1,6 @@
 # PRD — Apps Activation: an app-agnostic capability engine
 
-**Status:** Implemented (v2.12) · **Owner:** Arun Nayak · **Last updated:** 2026-08-21
+**Status:** Implemented (v2.13) · **Owner:** Arun Nayak · **Last updated:** 2026-08-24
 **Related:** [PR #1](https://github.com/arunn-18/App-activation-Arun/pull/1) · `engine/README.md` (dev changelog)
 
 ---
@@ -50,7 +50,7 @@ At the same time, admins setting up an app capability get no explanation of *why
 | 1 | Auth | shared | `connected_apps.json` + `connected_apps.py` (prerequisite/connection state, pinned `api_version`) |
 | 2 | Record-level configuration | A | `apps/setup.py` step 2 — pick objects from `app_catalog.objects_for()` |
 | 3 | Field config — view usecase | A | `apps/setup.py` step 3 — pick fields from `app_catalog.field_catalog()` |
-| 4 | Field config — write usecase | A | same step, sourced from `app_catalog.writable_field_catalog()`; `FEATURES[...]["kind"] == "write"` |
+| 4 | Field config — write usecase | A | same step, sourced from `app_catalog.writable_field_catalog()`; `FEATURES[...]["kind"] == "write"` — proven on TWO apps (`salesforce_create_contact`, `clickup_create_task_from_hiver`) |
 | 5 | App-native automation | B | `automation/schema.py: NATIVE_ACTIONS` — a pre-built Hiver action block, not a composed call |
 | 6 | API-driven automation | B | `automation/schema.py: RECIPES` (hand-vetted) or a model-composed `custom_plan` (validated by `plan_validator.py`) |
 
@@ -96,6 +96,8 @@ No changes to `router.py`, either `extract.py`, `validator.py`, `plan_validator.
 - **A composed plan gets a stricter completeness bar than a recipe.** A recipe already proved correct once (via its own test suite) can complete on a clean `no_match`. A plan that has never run before must actually execute successfully against the mock to count as complete.
 - **Track A's existing steps are frozen.** Generalizing the field catalog or adding the write-usecase branch must never change the 4-step order, question wording, or completeness rule for an existing feature — verified by re-running every pre-existing assertion unchanged.
 - **API version pinning.** A real integration's auth is issued against one API version; every call for that connection must target that same version's endpoints, never "latest" or an inferred version. `connected_apps.api_version()` is the one place this is read from — see §9.
+- **Every automation names its enable scope.** A top-level `enabled_inboxes` slot is required the moment a real workspace is loaded, the Track B analogue of Track A's own "which shared inbox(es)" step — never left implicit or workspace-wide by default.
+- **A prerequisite gate must offer its own fix, not just name itself.** Any mechanism (recipe, native action, composed plan) that blocks on an unmet prerequisite must offer the real one-click fix when one exists (`connected_apps.PREREQUISITE_ACTIONS`) — a static "must be connected" message with nothing to click is a dead end, not a guardrail.
 
 ## 9. Explicitly out of scope for this phase (flagged, not silently dropped)
 
@@ -109,13 +111,13 @@ All new capabilities ship with a pure-code, no-LLM test suite (routing/extractio
 
 | Suite | Coverage | Result |
 |---|---|---|
-| `test_validator.py` | automation schema/validator core | 56/56 + 58/58 units |
-| `test_connector.py` | recipe-based connector | 27/27 |
+| `test_validator.py` | automation schema/validator core, incl. `enabled_inboxes` | 56/56 core + 62/62 units |
+| `test_connector.py` | recipe-based connector, incl. `connect_requested` | 29/29 |
 | `test_connector_planner.py` | dynamic-plan guardrails | 18/18 |
-| `test_track_a.py` | full app-setup flow incl. write usecase | 34/34 |
-| `test_native_action.py` | native-action mechanism (ClickUp) | 10/10 |
+| `test_track_a.py` | full app-setup flow incl. write usecase | 45/45 |
+| `test_native_action.py` | native-action mechanism (ClickUp), 6-field form, app-scoped vocab | 24/24 |
 | `test_mapping_explanation.py` | step-3 explanation, all mechanisms | 7/7 |
-| `test_real_conversation.py` | step-7 real-conversation testing | 12/12 |
+| `test_real_conversation.py` | step-7 real-conversation testing, incl. ClickUp write feature | 23/23 |
 
 No regression to any pre-existing assertion across the whole body of work. UI (`ui/lib/api.ts`, `RuleCard.tsx`, `FeatureCard.tsx`) kept in lockstep, `npx tsc --noEmit` clean.
 
@@ -193,14 +195,14 @@ engine/
 ├── simulate.py                    # multi-turn self-play simulation harness
 ├── make_mailbox.py / mailbox.json # demo inbox fixture
 │
-├── test_validator.py              # automation schema/validator suite — 56/56 core, 58/58 units
-├── test_connector.py              # connector recipe suite — 27/27
+├── test_validator.py              # automation schema/validator suite — 56/56 core, 62/62 units
+├── test_connector.py              # connector recipe suite — 29/29
 ├── test_connector_planner.py      # dynamic-plan guardrail suite — 18/18
-├── test_track_a.py                # app-setup flow suite — 34/34 (write-usecase branch added)
-├── test_native_action.py          # ClickUp native-action suite — 10/10
+├── test_track_a.py                # app-setup flow suite — 45/45 (write-usecase branch, 2 apps)
+├── test_native_action.py          # ClickUp native-action suite — 24/24 (6 fields, one-block form)
 ├── test_mapping_explanation.py    # step-3 explanation suite — 7/7
-├── test_real_conversation.py      # capability 7 suite — 12/12
-└── README.md                      # dev changelog (through the v2.12 "onboard-any-app" entry)
+├── test_real_conversation.py      # capability 7 suite — 23/23 (2 apps' write features)
+└── README.md                      # dev changelog (through the v2.13 live-testing-fixes entry)
 ```
 
 ---

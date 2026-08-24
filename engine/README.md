@@ -640,6 +640,106 @@ connector planner 18/18. `ui/` (FeatureCard.tsx, RuleCard.tsx, lib/api.ts)
 updated for every new field on both wire contracts and typechecks clean
 (`npx tsc --noEmit`).
 
+## Live-testing fixes + connector connect-fix + ClickUp field expansion + inbox scoping + capability 4's second app (v2.13, 2026-08-24)
+
+The ask this pass: a round of live testing against v2.12 surfaced real gaps
+no eval record had exercised — a UI crash, a stale router rule, a
+prerequisite an admin could see but never fix, and a native action that
+only covered two of ClickUp's real task fields. Each is fixed at its root
+cause, not patched at the symptom, plus the two structural asks that came
+out of that testing: every automation must now say which shared inbox(es)
+it applies to, and capability 4 (write-usecase field config) needed a
+SECOND real app to prove it, not just Salesforce.
+
+**RuleCard crash on a bare capability question.** `copilot._turn()` was
+labeling an unmatched `app_setup` turn `"track": "automation"` while handing
+back an apps_extract-shaped spec with no `trigger`/`actions` — one track's
+shape leaking into the other's consumer. Fixed by normalizing to the same
+empty automation shape a fresh automation turn already gets.
+
+**Router disambiguation rewrite.** "Create a Contact from Hiver" was
+misrouted to Track B: a stale DISAMBIGUATION rule ("creating is automation,
+even if it mentions the app") predated capability 4 and contradicted the
+router's own FEATURES vocab. Rewritten around the real signal — does an
+agent invoke this by hand once enabled (`app_setup`), or does it fire
+automatically on a trigger (`automation`) — using `salesforce_create_contact`
+as the worked example. A separate, unrelated symptom of the same report
+(a suggestion chip template, `"Set up: X — Y"`, reading as automation-shaped
+to the classifier) was fixed by using the bare capability name instead.
+
+**Connector automations can now actually fix their own prerequisite gate.**
+`connected_apps.connect()` had only ever been called from Track A's
+`apps/setup.py` — a connector action's prerequisite check in
+`automation/validator.py` could tell an admin ClickUp wasn't connected, but
+offered nothing to click, a dead end live testing caught immediately. Fixed
+with a new `connect_requested` slot and a shared `_check_connector_
+prerequisites()` helper (recipe/native/custom_plan mechanisms all route
+through it): when a one-click fix exists (`connected_apps.PREREQUISITE_
+ACTIONS`), it's now a real "Connect ClickUp" choice question, same shape
+Track A's own connect step already offered; when none exists (e.g.
+`account_team_enabled`), it stays an honest static error rather than a fake
+CTA.
+
+**ClickUp native action expanded to all 6 real task fields**, and bundled
+into ONE form. `clickup_create_task` covered only List/Title; live testing
+asked for the whole task-creation block — Description, Assignee, Due date,
+Priority added (all optional; `clickup_mock.create_task()` never fakes an
+unset one). Asking for all 6 sequentially would have meant 6 back-and-forth
+turns, so `validator.py` gained a new structured-question `kind: "form"` —
+one UI block bundling every field (required ones flagged, `priority_hint`
+offered as a real enum choice, not free text) — submitted as ONE chat
+message that still round-trips through the same provenance-guarded
+extraction pipeline. `QuestionForm.tsx` renders `kind: "form"` questions via
+a new dedicated `FieldBlockForm` component, outside the existing
+one-question-at-a-time `Questionnaire` pagination.
+
+**Every automation now names its shared inbox(es).** A new top-level
+`enabled_inboxes` slot, required the moment a real workspace is loaded
+(`ws is not None`) — skipped entirely for eval/CLI runs, since `ws=None`
+there — the direct Track B analogue of Track A's own step 4 ("ENABLED
+FOR"). Blast radius turned out much smaller than first estimated: most
+connector tests pass `apps_ws=` (connection state) but not `ws=` (the
+entity/inbox fixture), so only `test_validator.py`'s own "complete" fixtures
+needed `enabled_inboxes` added.
+
+**Extraction vocab is now genuinely scoped per app**, closing a TODO
+`serve_apps.py`'s own docstring had carried since there was only one app to
+scope against. `automation/extract.py`'s `_vocab_block(app=None)` filters
+`RECIPES`/`NATIVE_ACTIONS`/the connector action's own `recipe=` enum/the
+Salesforce-only custom_plan objects line by app; threaded through
+`copilot._turn()` → `respond()`/`respond_structured()` → `serve_apps.py`'s
+`/chat` handler, which now actually passes `app=app`. `app=None` (the
+general Automations page) is verified byte-identical to the old unscoped
+behavior.
+
+**Capability 4's second app: `clickup_create_task_from_hiver`.** The
+Salesforce write feature was the only proof capability 4 generalized past
+one app; live testing asked for the same "create X from a conversation"
+flow for a ClickUp task. `app_catalog.py` gained a `clickup` → `Task` entry
+(6 fields, `write: True`, api names matching `clickup_mock.create_task()`'s
+own kwargs so `field_by_label()` needed no adapter); `apps/setup.py`'s
+`resolve_setup()` needed only a small `_WRITABLE_CATALOG_BY_APP`/`_CREATE_
+OPS` config table (catalog+describe-call, create-op dispatch) in place of
+its two Salesforce-only hardcoded lines — the object-picker and
+`<object>_fields` slot-derivation logic underneath were already fully
+app-agnostic. `clickup_mock.describe_writable_fields()` mirrors the
+Salesforce version exactly. This is a genuinely separate mechanism from
+`clickup_create_task` (the native ACTION above) — one is Track A (an agent
+manually creates one task from an open conversation), the other is Track B
+(an automation fires on a trigger, no human in the loop); same app, same
+underlying mock call, deliberately different ids.
+
+**Testing:** no regressions — every pre-existing assertion still passes,
+plus additive coverage for each fix above: `test_track_a.py` 45/45,
+`test_connector.py` 29/29, `test_connector_planner.py` 18/18,
+`test_native_action.py` 24/24 (6-field form, `connect_requested`,
+app-scoped vocab), `test_validator.py` 56/56 core + 62/62 units
+(`enabled_inboxes`), `test_real_conversation.py` 23/23 (ClickUp write
+feature end to end), `test_mapping_explanation.py` 7/7 unchanged. `ui/`
+(`QuestionForm.tsx`'s form-question split, `RuleCard.tsx`'s "ENABLED FOR"
+row, `lib/api.ts`'s new field/type additions) typechecks clean
+(`npx tsc --noEmit`).
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session

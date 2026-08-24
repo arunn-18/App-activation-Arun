@@ -138,6 +138,35 @@ def run():
     check("copilot.test_create_feature: happy path end to end",
           tc3["status"] == "ok" and tc3["record"]["name"] == "Jamie Doe")
 
+    # ---- capability 4 generalizes past Salesforce: the SAME write flow, -----
+    # driving a genuinely different app (ClickUp), config-only (task #10) --
+    clickup_connected = _connected_ws("clickup")
+    clickup_fs = {"connect_requested": None, "objects": ["Task"],
+                 "task_fields": ["Title", "List"], "inboxes": ["Support"],
+                 "test_contact_email": None}
+    r7 = features.resolve_setup("clickup_create_task_from_hiver", clickup_fs, clickup_connected)
+    check("ClickUp write feature completes the same way Salesforce's does",
+          r7["status"] == "complete" and r7["preview"] is None)
+
+    clickup_feature = r7["feature"]
+    tc4 = features.test_create(clickup_feature,
+                               {"Title": "Follow up", "List": "Support Escalations"})
+    check("test_create dispatches to ClickUp's create_task via _CREATE_OPS, "
+          "resolving display labels to clickup_mock's real kwargs",
+          tc4["status"] == "ok" and tc4["object"] == "Task"
+          and tc4["record"]["name"] == "Follow up"
+          and tc4["record"]["list"] == "Support Escalations")
+
+    tc5 = features.test_create(clickup_feature, {"Title": "Follow up", "Priority": "High"})
+    check("test_create still rejects an unexposed field for a second app too",
+          tc5["status"] == "error" and "Priority" in tc5["reason"])
+
+    tc6 = copilot.test_create_feature(
+        clickup_feature, {"Title": "Follow up", "List": "Support Escalations"},
+        clickup_connected)
+    check("copilot.test_create_feature end to end for ClickUp",
+          tc6["status"] == "ok" and tc6["record"]["name"] == "Follow up")
+
     # ---- rendering: TEST RUN line, or a real-conversation nudge when absent -
     draft_with_preview = copilot.render_feature(r4)
     check("draft shows the real test-run values, not just that setup finished",

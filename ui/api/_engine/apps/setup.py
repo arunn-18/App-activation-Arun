@@ -50,11 +50,37 @@ conversations with SF records (the product spec's other listed setup
 steps) are explicitly NOT built here — out of scope for this pass.
 """
 import app_catalog
+import clickup_mock
 import connected_apps
 import salesforce_mock
 import workspace as wsmod
 
 from . import schema
+
+# Display casing for prose ("from Salesforce:", "from ClickUp:") — kept here
+# rather than app.title() because "clickup".title() gives "Clickup", not the
+# product's real capitalization.
+APP_DISPLAY_NAMES = {"salesforce": "Salesforce", "clickup": "ClickUp"}
+
+# Step 3's catalog + describe-call source, one entry per onboarded app — the
+# same "config, not a new branch" cost every other per-app extension in this
+# engine already pays (NATIVE_ACTIONS, connected_apps.json, app_catalog.py's
+# CATALOG). Adding a THIRD app's write feature means one entry here, not a
+# new if/elif.
+_WRITABLE_CATALOG_BY_APP = {
+    "salesforce": (schema.WRITABLE_FIELD_CATALOG, salesforce_mock.describe_writable_fields),
+    "clickup": (schema.CLICKUP_WRITABLE_FIELD_CATALOG, clickup_mock.describe_writable_fields),
+}
+
+# test_create()'s create-op dispatch, by (app, object_name) — mirrors
+# _WRITABLE_CATALOG_BY_APP's "config, not a branch" shape. Each op takes
+# {api_field_name: value} and returns the mock's real created-record dict;
+# signatures are untouched so automation/executor.py's own calls into these
+# same mock functions (capability 5/6) are unaffected.
+_CREATE_OPS = {
+    ("salesforce", "Contact"): lambda api_fields: salesforce_mock.create_contact(api_fields),
+    ("clickup", "Task"): lambda api_fields: clickup_mock.create_task(**api_fields),
+}
 
 MAX_QUESTIONS = 1  # Track A asks ONE thing per turn — a short, ordered wizard,
                    # not a bundle (unlike validator.py's up-to-3: this flow is
@@ -147,14 +173,16 @@ def test_create(feature, field_values):
     let a submission smuggle in something not configured" discipline every
     provenance check in this engine already holds itself to.
 
-    SHAPED BY ONE EXAMPLE: only creates a Contact — the one write feature
-    this pass actually offers. A future write feature covering another
-    object needs its own create_<object> op in salesforce_mock.py and its
-    own branch here, the same discipline preview_feature()'s own comment
-    already asks for."""
+    SHAPED BY TWO EXAMPLES: creates a Salesforce Contact or a ClickUp Task —
+    the two write features this pass offers, dispatched via _CREATE_OPS by
+    (app, object_name). A future write feature covering another object
+    needs its own create_<object> op in that app's mock service and one
+    more _CREATE_OPS entry, the same "config, not a branch" discipline
+    _WRITABLE_CATALOG_BY_APP above already pays."""
     fields_by_object = feature.get("fields_by_object") or {}
     object_name = next(iter(fields_by_object), None)
-    if object_name != "Contact":
+    op = _CREATE_OPS.get((feature["app"], object_name))
+    if op is None:
         return {"status": "error",
                 "reason": f"don't know how to create a {object_name or 'record'} yet"}
     chosen_labels = set(fields_by_object[object_name])
@@ -165,7 +193,7 @@ def test_create(feature, field_values):
     api_by_label = app_catalog.field_by_label(feature["app"], object_name)
     api_fields = {api_by_label[label]: value for label, value in field_values.items()
                  if label in api_by_label and value not in (None, "")}
-    record = salesforce_mock.create_contact(api_fields)
+    record = op(api_fields)
     return {"status": "ok", "object": object_name, "record": record}
 
 
@@ -231,9 +259,13 @@ def resolve_setup(feature_id, feature_setup, apps_ws, ws=None):
     # different question wording ("show" vs "fill in when creating one").
     # The view branch (default, existing behavior) is UNCHANGED by this
     # branch's existence — same catalog, same describe call, same wording.
-    catalog_by_object = schema.WRITABLE_FIELD_CATALOG if is_write else schema.FIELD_CATALOG
-    describe = (salesforce_mock.describe_writable_fields if is_write
-               else salesforce_mock.describe_fields)
+    if is_write:
+        catalog_by_object, describe = _WRITABLE_CATALOG_BY_APP[app]
+    else:
+        # no non-Salesforce view feature exists yet — see schema.py's
+        # SHAPED-BY-TWO-EXAMPLES note; the write branch above is the one
+        # that's genuinely per-app today.
+        catalog_by_object, describe = schema.FIELD_CATALOG, salesforce_mock.describe_fields
     question_verb = "fill in when creating one" if is_write else "show"
 
     fields_by_object = {}
@@ -253,7 +285,8 @@ def resolve_setup(feature_id, feature_setup, apps_ws, ws=None):
             described = describe(obj)
             q = _question(
                 f"feature_setup.{chosen_key}",
-                f"Which {obj} fields should {question_verb}? (from Salesforce: "
+                f"Which {obj} fields should {question_verb}? (from "
+                f"{APP_DISPLAY_NAMES.get(app, app.title())}: "
                 + ", ".join(x["name"] for x in described["fields"]) + ")",
                 [{"label": x["name"], "value": x["name"]} for x in described["fields"]],
                 multiple=True)

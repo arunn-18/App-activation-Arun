@@ -112,6 +112,28 @@ CATALOG = {
             },
         },
     },
+    "clickup": {
+        # WRITE only — capability 4's second app-agnostic proof (after
+        # salesforce_create_contact): the same field-config step Track A
+        # already had, now driving a genuinely different app. Field labels
+        # are chosen to be human-facing; the underlying api names are
+        # DELIBERATELY the exact kwargs clickup_mock.create_task() already
+        # takes, so apps/setup.py's generic label->api_name resolution
+        # (field_by_label) hands back a dict that op accepts directly —
+        # no per-app adapter needed. No "view" flags anywhere: there is no
+        # Track A view feature for ClickUp (yet), so nothing here claims one.
+        "Task": {
+            "table": "tasks",
+            "fields": {
+                "list_name": {"label": "List", "type": "string", "write": True},
+                "title": {"label": "Title", "type": "string", "write": True},
+                "description": {"label": "Description", "type": "string", "write": True},
+                "assignee": {"label": "Assignee", "type": "string", "write": True},
+                "due_date": {"label": "Due Date", "type": "string", "write": True},
+                "priority": {"label": "Priority", "type": "string", "write": True},
+            },
+        },
+    },
 }
 
 

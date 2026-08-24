@@ -55,6 +55,22 @@ FEATURES = {
         "prerequisites": ["salesforce_connected"],
         "object_choices": ["Contact"],
     },
+    "clickup_create_task_from_hiver": {
+        "app": "clickup",
+        "kind": "write",
+        "name": "Create a Task from Hiver",
+        # Deliberately a different id from automation/schema.py's
+        # NATIVE_ACTIONS["clickup_create_task"] — this is Track A (an agent
+        # manually creates one task, once, from an open conversation);
+        # that other one is Track B (an automation fires it on a trigger,
+        # no human in the loop). Same app, same underlying clickup_mock.py
+        # call, two structurally separate mechanisms per the split this
+        # engine has kept since Track A/B were divided.
+        "description": ("Let agents create a new ClickUp task directly from a "
+                        "conversation, filling in the fields you choose here."),
+        "prerequisites": ["clickup_connected"],
+        "object_choices": ["Task"],
+    },
 }
 
 # The full out-of-the-box object list Salesforce's "Record-level visibility
@@ -81,3 +97,8 @@ FIELD_CATALOG = app_catalog.field_catalog("salesforce")
 # relationship to app_catalog.py. apps/setup.py's write-usecase step reads
 # this; the existing view-usecase step above is untouched by its existence.
 WRITABLE_FIELD_CATALOG = app_catalog.writable_field_catalog("salesforce")
+
+# clickup_create_task_from_hiver's field-config step reads this instead —
+# same DERIVED relationship, second app proving the catalog is genuinely
+# per-app rather than hand-tied to Salesforce.
+CLICKUP_WRITABLE_FIELD_CATALOG = app_catalog.writable_field_catalog("clickup")

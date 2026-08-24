@@ -30,6 +30,13 @@ def _vocab_block():
                  "standard AND custom; nothing outside these lists is real):")
     for obj, cat in schema.FIELD_CATALOG.items():
         lines.append(f"  {obj}: standard={cat['standard']}, custom={cat['custom']}")
+    # clickup_create_task_from_hiver (capability 4's second app) has no VIEW
+    # feature/catalog at all — its only legal field vocab is the write-usecase
+    # one, so it needs its own listing rather than reusing FIELD_CATALOG above.
+    lines.append("TASK FIELD CATALOG (legal values for `task_fields` — "
+                 "standard AND custom; nothing outside these lists is real):")
+    for obj, cat in schema.CLICKUP_WRITABLE_FIELD_CATALOG.items():
+        lines.append(f"  {obj}: standard={cat['standard']}, custom={cat['custom']}")
     return "\n".join(lines)
 
 
@@ -53,12 +60,12 @@ EXTRACTION RULES:
    object_choices (e.g. "Account", "Contact") — legal values ONLY from the APP
    FEATURES setup line above, never invented, never a record type from a different
    feature.
-4. account_fields / contact_fields: every field name the user picked for that
-   object, legal values ONLY from the FIELD CATALOG above for that object (standard
-   or custom — both are real, don't treat custom fields as less legitimate). A
-   later message REMOVING a field ("actually, drop phone number") changes the
-   CURRENT list — re-derive the accumulated set from the whole conversation, don't
-   just append.
+4. account_fields / contact_fields / task_fields: every field name the user picked
+   for that object, legal values ONLY from the FIELD CATALOG / TASK FIELD CATALOG
+   above for that object (standard or custom — both are real, don't treat custom
+   fields as less legitimate). A later message REMOVING a field ("actually, drop
+   phone number") changes the CURRENT list — re-derive the accumulated set from the
+   whole conversation, don't just append.
 5. inboxes: every shared inbox the user names when asked which inbox(es) this
    feature should be enabled for — capture their own words for the name(s)
    verbatim (e.g. "Support", "the billing inbox"); the code matches them against
@@ -105,6 +112,9 @@ RESPONSE_SCHEMA = {
             # for the same point from the other track).
             "account_fields": {"type": ["array", "null"], "items": {"type": "string"}},
             "contact_fields": {"type": ["array", "null"], "items": {"type": "string"}},
+            # clickup_create_task_from_hiver's own <object>_fields slot — same
+            # fixed-shape reasoning as account_fields/contact_fields above.
+            "task_fields": {"type": ["array", "null"], "items": {"type": "string"}},
             "inboxes": {"type": ["array", "null"], "items": {"type": "string"}},
             # "test on a real conversation" (capability 7, rule 7b) — a
             # courtesy once the feature is otherwise complete, never
@@ -121,8 +131,8 @@ RESPONSE_SCHEMA = {
             },
         },
         "required": ["intent_summary", "feature", "connect_requested", "objects",
-                     "account_fields", "contact_fields", "inboxes", "test_contact_email",
-                     "closing", "unmappable"],
+                     "account_fields", "contact_fields", "task_fields", "inboxes",
+                     "test_contact_email", "closing", "unmappable"],
     },
 }
 

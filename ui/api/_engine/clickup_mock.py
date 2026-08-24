@@ -19,6 +19,8 @@ salesforce_mock.py's docstring already flags.
 """
 import itertools
 
+from apps import schema as apps_schema
+
 _task_ids = itertools.count(1001)
 
 
@@ -44,3 +46,20 @@ def create_task(list_name, title, description=None, assignee=None, due_date=None
     if priority:
         task["priority"] = priority
     return task
+
+
+def describe_writable_fields(object_name):
+    """clickup_create_task_from_hiver's analogue of
+    salesforce_mock.describe_writable_fields(): which fields an admin can
+    offer agents to fill in when creating a new ClickUp Task from Hiver
+    (Track A's write-usecase step). Reads apps.schema's
+    CLICKUP_WRITABLE_FIELD_CATALOG — same DERIVED-from-app_catalog.py
+    relationship, same {"success", "object", "fields"} response shape as
+    the Salesforce version, so apps/setup.py's resolve_setup() needs no
+    per-app branching downstream of this call."""
+    catalog = apps_schema.CLICKUP_WRITABLE_FIELD_CATALOG.get(object_name)
+    if catalog is None:
+        return {"success": False, "object": object_name, "fields": []}
+    fields = ([{"name": f, "kind": "standard"} for f in catalog["standard"]]
+             + [{"name": f, "kind": "custom"} for f in catalog["custom"]])
+    return {"success": True, "object": object_name, "fields": fields}
