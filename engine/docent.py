@@ -105,7 +105,12 @@ def _integration_answer(t):
     def _disp(app):
         return _APP_DISPLAY_NAMES.get(app, app.title())
 
-    parts = []
+    # a proper lead-in, not a mid-thought launch into "App features..." — a
+    # live test called the answer "random" without one, and correctly so.
+    lead = (f"{_disp(apps_to_cover[0])} integration covers what's live today:"
+           if len(apps_to_cover) == 1
+           else "Integrations cover what's live today, across every app connected here:")
+    parts = [lead]
     feats = [f for f in apps_schema.FEATURES.values() if f["app"] in apps_to_cover]
     if feats:
         parts.append(
@@ -137,7 +142,19 @@ def _integration_answer(t):
         parts.append("Automations that react as conversations come in: "
                      + "; ".join(b_parts) + ".")
 
-    parts.append("Everything else here isn't yet: " + "; ".join(schema.UNSUPPORTED.values())
+    # the UNSUPPORTED list is shared, app-agnostic vocabulary (custom fields,
+    # approval flows, SLA policies aren't tied to one app) — kept in every
+    # scoped answer. Its one entry that DOES namedrop a mechanism
+    # (connector_other's "...a hand-vetted Salesforce recipe, a native app
+    # action, or a Salesforce lookup...") reads as a non-sequitur when
+    # Salesforce was never in view for this answer at all, so it's
+    # generalized here rather than always quoting Salesforce specifically.
+    unsupported_items = []
+    for key, desc in schema.UNSUPPORTED.items():
+        if key == "connector_other" and "salesforce" not in apps_to_cover:
+            desc = "connector or app-action automations beyond what's built here"
+        unsupported_items.append(desc)
+    parts.append("Everything else here isn't yet: " + "; ".join(unsupported_items)
                  + ". I'll always say so rather than fake one of these.")
     return " ".join(parts)
 

@@ -1,6 +1,6 @@
 # PRD — Apps Activation: an app-agnostic capability engine
 
-**Status:** Implemented (v2.16) · **Owner:** Arun Nayak · **Last updated:** 2026-08-24
+**Status:** Implemented (v2.17) · **Owner:** Arun Nayak · **Last updated:** 2026-08-24
 **Related:** [PR #1](https://github.com/arunn-18/App-activation-Arun/pull/1) · `engine/README.md` (dev changelog)
 
 ---

@@ -599,12 +599,17 @@ export function hasQuestionForm(t: TurnState): boolean {
  *  VIP") still gets its card — only "no actions at all" is the tell, not "a
  *  question was asked". */
 export function hasRuleCard(t: TurnState): boolean {
+  // Track A (an app_feature match) has no `actions` field AT ALL -- must
+  // short-circuit before touching it, the same guard the final return
+  // below already relied on (t.track !== "feature" comes first there);
+  // the capability-question check below was added later and, unlike that
+  // return, evaluated `.actions.length` unconditionally -- a real crash a
+  // live test hit the moment a Track A badge (e.g. "Create a Task from
+  // Hiver") was clicked.
+  if (t.track === "feature") return false;
   const builtNothing = t.spec.actions.length === 0;
   if (t.capability_answer && builtNothing) return false;
-  return (
-    t.track !== "feature" &&
-    (!t.no_intent || Boolean(t.spec.trigger) || t.spec.actions.length > 0)
-  );
+  return !t.no_intent || Boolean(t.spec.trigger) || t.spec.actions.length > 0;
 }
 
 /** Track A: a turn worth rendering a FeatureCard for — an app_feature ask

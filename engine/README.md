@@ -902,6 +902,35 @@ assertions for the app-scoped prose, no cross-app badge leakage, and the
 questionnaire staying suppressed (26/26). No regressions across all 8
 suites (239 unit cases). `npx tsc --noEmit` clean.
 
+## Fix the crash v2.16 introduced, and a proper lead-in for scoped answers (v2.17, 2026-08-24)
+
+v2.16 shipped a real crash: `hasRuleCard()`'s new capability-question check
+read `t.spec.actions.length` unconditionally, before the existing
+`t.track !== "feature"` short-circuit ever ran — but a Track A feature
+match (e.g. clicking the "Create a Task from Hiver" badge) has NO `actions`
+field on its `spec` at all (confirmed directly: `'actions' in spec` is
+`False` for that shape), so this threw `Cannot read properties of
+undefined (reading 'length')` the moment a live test clicked that exact
+badge. Fixed by short-circuiting on `t.track === "feature"` first, before
+touching `.actions` at all — the same order the pre-existing final return
+statement already relied on for its own safety.
+
+Also, `docent._integration_answer()`'s scoped text launched straight into
+"App features an admin enables once per workspace..." with no framing
+sentence at all — a live test correctly called this "very random" reading.
+Added a proper lead-in ("ClickUp integration covers what's live today:" /
+"Salesforce integration covers what's live today:" / the all-apps
+equivalent when no app is named). Also generalized the one UNSUPPORTED
+entry that namedrops a mechanism (`connector_other`'s "...a hand-vetted
+Salesforce recipe... a Salesforce lookup...") when Salesforce isn't
+actually in view for that answer — it read as a non-sequitur in a
+ClickUp-only answer to call out Salesforce-specific mechanisms as what's
+still missing.
+
+No regressions across all 8 suites (239 unit cases; the existing prose
+assertions in `test_feature_request_offer.py` still hold with the added
+lead-in). `npx tsc --noEmit` clean.
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session
