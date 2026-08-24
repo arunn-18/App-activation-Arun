@@ -280,6 +280,15 @@ EXTRACTION RULES:
    until the user actually names one; once named, keep it for the rest of the
    conversation. Never guess a "default" or "all inboxes" — the admin always
    states this explicitly, the same way Track A's own inbox-enable step works.
+21. feature_request_requested: true the moment the user agrees to log an
+   unsupported/unmappable ask as a feature request (answers "yes"/"log it"/
+   "please" to the copilot's own offer, or says so unprompted); false the
+   moment they explicitly decline ("no thanks", "don't bother", "no"). This
+   is a courtesy, not part of the rule itself — never let it affect trigger/
+   conditions/actions/unsupported_requests/unmappable in any way. Leave null
+   until the user actually answers either way; once answered (true OR
+   false), keep that answer for the rest of the conversation — don't keep
+   re-asking after a "no".
 """
 
 
@@ -468,11 +477,17 @@ RESPONSE_SCHEMA = {
             # of the WHOLE rule, not one action, so it lives at this level
             # (Track A's own inbox-enable step is the direct precedent).
             "enabled_inboxes": {"type": ["array", "null"], "items": {"type": "string"}},
+            # rule 21: the Discovery movement's "log this as a feature
+            # request?" offer (Apps Activation PRD, 2026-08-24) — a property
+            # of the WHOLE turn's escalation (unsupported_requests/
+            # unmappable), not one action, so it lives here alongside
+            # enabled_inboxes rather than nested in an action's params.
+            "feature_request_requested": {"type": ["boolean", "null"]},
         },
         "required": ["intent_summary", "trigger", "scope_confirmed",
                      "condition_groups", "actions", "ai_extract",
                      "unsupported_requests", "closing", "unmappable",
-                     "enabled_inboxes"],
+                     "enabled_inboxes", "feature_request_requested"],
     },
 }
 

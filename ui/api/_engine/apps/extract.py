@@ -92,6 +92,14 @@ EXTRACTION RULES:
    being an app-setup-shaped request — record {{request: <user's own words>,
    why: <what is missing>}}, leave `feature` null. Never bend a mismatched ask into
    the nearest feature to make it fit.
+9. feature_request_requested: true the moment the user agrees to log an unmappable
+   ask as a feature request (answers "yes"/"log it"/"please" to the copilot's own
+   offer, or says so unprompted); false the moment they explicitly decline ("no
+   thanks", "don't bother", "no"). This is a courtesy, not part of the feature
+   setup itself — never let it affect feature/objects/fields/inboxes/unmappable in
+   any way. Leave null until the user actually answers either way; once answered
+   (true OR false), keep that answer for the rest of the conversation — don't keep
+   re-asking after a "no".
 """
 
 RESPONSE_SCHEMA = {
@@ -129,10 +137,15 @@ RESPONSE_SCHEMA = {
                                          "why": {"type": "string"}},
                           "required": ["request", "why"]},
             },
+            # rule 9: the Discovery movement's "log this as a feature
+            # request?" offer (Apps Activation PRD, 2026-08-24) — same
+            # slot/meaning as automation/extract.py's own field.
+            "feature_request_requested": {"type": ["boolean", "null"]},
         },
         "required": ["intent_summary", "feature", "connect_requested", "objects",
                      "account_fields", "contact_fields", "task_fields", "inboxes",
-                     "test_contact_email", "closing", "unmappable"],
+                     "test_contact_email", "closing", "unmappable",
+                     "feature_request_requested"],
     },
 }
 

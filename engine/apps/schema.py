@@ -45,6 +45,13 @@ FEATURES = {
                         "(company, owner, CSM, open cases) alongside the conversation."),
         "prerequisites": ["salesforce_connected"],
         "object_choices": ["Account", "Contact"],
+        # Apps Activation PRD (2026-08-24)'s Knowledge layer wants "example
+        # phrasings" per catalogue entry — real asks this feature actually
+        # matches, reused by docent.py's capability answers (never invented
+        # fresh there) so an admin asking "what can this do?" sees something
+        # they could actually type, not a restated description.
+        "example_phrasings": ["set up Salesforce account cards for my shared mailbox",
+                              "show me the customer's Salesforce account and contact info"],
     },
     "salesforce_create_contact": {
         "app": "salesforce",
@@ -54,6 +61,8 @@ FEATURES = {
                         "conversation, filling in the fields you choose here."),
         "prerequisites": ["salesforce_connected"],
         "object_choices": ["Contact"],
+        "example_phrasings": ["let agents create a Salesforce Contact from a conversation",
+                              "create a Contact from Hiver"],
     },
     "clickup_create_task_from_hiver": {
         "app": "clickup",
@@ -70,6 +79,8 @@ FEATURES = {
                         "conversation, filling in the fields you choose here."),
         "prerequisites": ["clickup_connected"],
         "object_choices": ["Task"],
+        "example_phrasings": ["let agents create a ClickUp task directly from a conversation",
+                              "Create a Task from Hiver"],
     },
 }
 

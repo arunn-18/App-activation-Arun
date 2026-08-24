@@ -14,8 +14,10 @@ place that talks to both.
 """
 import json
 
+import analytics
 import connected_apps
 import docent
+import feature_requests
 import mailbox_lookup
 import router
 from apps import extract as apps_extract
@@ -509,6 +511,64 @@ def _test_conversation_suggestions(limit=2):
     return f"Want to see it in action? Try a real conversation, e.g. {examples}."
 
 
+def _feature_request_question():
+    return {"slot": "feature_request_offer", "prompt": "Log this as a feature request?",
+            "kind": "choice", "options": [
+                {"label": "Yes, log it", "value": "log this as a feature request"},
+                {"label": "No thanks", "value": "no, don't log it"}],
+            "multiple": False, "allow_other": False, "other_hint": ""}
+
+
+def _apply_feature_request_offer(spec, result, app, track):
+    """The Discovery movement's "no match -> auto-raises a feature request
+    instead of failing silently" (Apps Activation PRD, 2026-08-24) — scoped
+    EXACTLY to the PRD's own Escalation Trigger table row ("No match in the
+    catalogue -> Feature request logged"), which is `unmappable` specifically
+    (a genuinely novel ask, no APP FEATURES/RECIPES/NATIVE_ACTIONS entry
+    resembles it at all) — NOT `unsupported_requests` (an already-known,
+    already-categorized gap like custom fields or approval flows; Hiver
+    already knows those exist, so re-logging them here would just be noise,
+    not a demand signal for something unbuilt).
+
+    Applies uniformly to BOTH tracks: `unmappable` reaches this point from
+    either automation/extract.py's own field or apps/extract.py's (via
+    _turn()'s no-match reshape into the automation-empty spec shape) — same
+    key, same shape, one place to handle it. A no-op when there's nothing
+    unmappable this turn.
+
+    Logging is EXPLICIT and admin-confirmed — see feature_requests.py's own
+    docstring for why — never automatic just because something didn't
+    match. Mutates `result` in place (adds the offer/confirmation question or
+    line) and returns the courtesy prose line to show, or None.
+
+    `track`: the router's OWN decision for this turn ("app_setup" |
+    "automation") — NOT inferred from `app` (the Apps-panel vocab-scoping
+    param), since a turn asked from a scoped Apps panel can still resolve to
+    either track (that mismatch is exactly the router bug fixed earlier this
+    phase)."""
+    unmappable = result.get("unmappable") or []
+    if not unmappable:
+        return None
+    answered = spec.get("feature_request_requested")
+    if answered is None:
+        result.setdefault("questions_structured", []).append(_feature_request_question())
+        return None
+    if answered is False:
+        return "No problem — not logged."
+    # `app` (the Apps-panel scoping param) is only reliably which app the
+    # request is ABOUT when it was asked from that scoped panel; on the
+    # general Automations page (app=None) an unmappable ask can still name
+    # any app (e.g. "create a ticket in Zendesk") that this engine has no
+    # structured way to pull out of a free-text `unmappable` item today —
+    # left None there rather than guessing, same "honest gap, not a
+    # fabricated value" stance this engine holds everywhere else.
+    for item in unmappable:
+        feature_requests.log(app=app, request=item["request"], why=item["why"], track=track)
+        analytics.emit(analytics.EVENTS.FEATURE_REQUEST_LOGGED,
+                       {"app_id": app, "requested_capability_text": item["request"]})
+    return "Logged as a feature request — thanks, we'll let you know if we build this."
+
+
 def _mapping_explanation(spec, feature_result):
     """The requested conversational step this codebase didn't have yet:
     identify the usecase, map it to the catalog, and SAY the mapping out
@@ -617,6 +677,7 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None, app=None):
                 "actions": [], "ai_extract": None, "unsupported_requests": [],
                 "closing": spec.get("closing", False),
                 "unmappable": spec.get("unmappable") or [],
+                "feature_request_requested": spec.get("feature_request_requested"),
                 "capability_question": spec.get("capability_question"),
                 "no_intent": spec.get("no_intent"),
             }
@@ -641,6 +702,8 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None, app=None):
 
     spec["mapping_explanation"] = (
         _mapping_explanation(spec, result.get("feature_request")) if is_first_turn else None)
+    result["feature_request_offer"] = _apply_feature_request_offer(
+        spec, result, app, route["track"])
 
     # capability questions: the model only classifies (router.py); the answer
     # is composed in code from schema.py so nothing unbuildable is ever
@@ -687,6 +750,7 @@ def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
                               if spec.get("capability_question") else None),
         "no_intent": spec.get("no_intent") or None,
         "mapping_explanation": spec.get("mapping_explanation"),
+        "feature_request_offer": result.get("feature_request_offer"),
         "closing": bool(spec.get("closing")),
         "done": bool(spec.get("closing")) and complete,
         "intent_summary": spec.get("intent_summary") or "",
@@ -818,6 +882,8 @@ def respond(client, messages, model=None, ws=None, apps_ws=None, app=None):
         if result.get("unmappable"):
             parts.append("Couldn't build into the rule: " + "; ".join(
                 f"{u['request']} ({u['why']})" for u in result["unmappable"]) + ".")
+        if result.get("feature_request_offer"):
+            parts.append(result["feature_request_offer"])
         if test_run_line:
             parts.append(test_run_line)
         parts.append("```json\n" + json.dumps(to_final_json(spec), ensure_ascii=False, indent=1)
@@ -847,6 +913,8 @@ def respond(client, messages, model=None, ws=None, apps_ws=None, app=None):
     if result.get("unmappable"):
         parts.append("Couldn't build into the rule: " + "; ".join(
             f"{u['request']} ({u['why']})" for u in result["unmappable"]) + ".")
+    if result.get("feature_request_offer"):
+        parts.append(result["feature_request_offer"])
 
     qs = result["questions"]
     if closing and qs:

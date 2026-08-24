@@ -71,7 +71,15 @@ def _check_connector_prerequisites(apps_ws, action, ai, name, app, prerequisite_
     fix_key = next((p for p in unmet if p in connected_apps.PREREQUISITE_ACTIONS), None)
     if fix_key is None:
         labels = [connected_apps.PREREQUISITE_LABELS.get(p, p) for p in unmet]
-        errors.append(f"action {ai + 1}: '{name}' isn't buildable yet — " + "; ".join(labels))
+        # self-serve remediation (Apps Activation PRD, 2026-08-24): a gate
+        # with no one-click fix must still say HOW to clear it, not just
+        # name it — see connected_apps.PREREQUISITE_REMEDIATION.
+        fixes = [connected_apps.remediation_for(p) for p in unmet]
+        fixes = [f for f in fixes if f]
+        msg = f"action {ai + 1}: '{name}' isn't buildable yet — " + "; ".join(labels)
+        if fixes:
+            msg += ". To fix it yourself: " + " ".join(fixes)
+        errors.append(msg)
     else:
         missing.append(_connect_question(ai, name, fix_key))
     return True

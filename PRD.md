@@ -1,6 +1,6 @@
 # PRD — Apps Activation: an app-agnostic capability engine
 
-**Status:** Implemented (v2.13) · **Owner:** Arun Nayak · **Last updated:** 2026-08-24
+**Status:** Implemented (v2.14) · **Owner:** Arun Nayak · **Last updated:** 2026-08-24
 **Related:** [PR #1](https://github.com/arunn-18/App-activation-Arun/pull/1) · `engine/README.md` (dev changelog)
 
 ---
@@ -70,6 +70,7 @@ A request that fits none of these — no matching `FEATURES` entry, no `NATIVE_A
 | 2. Map to catalogue | Extraction resolves the ask to a `FEATURES` entry, a `RECIPES`/`NATIVE_ACTIONS` id, or a composed plan | same |
 | 3. Explain the mapping | One sentence, composed only from existing schema/registry data, shown once per conversation | `copilot._mapping_explanation()`, gated by `is_first_turn` |
 | 4. Decide the bucket | Track A / Track B / neither — `unsupported_requests` when nothing fits | `automation/extract.py` rule 19, `apps/extract.py` rule 20 |
+| 4b. Discovery: no match → feature request | A genuinely novel ask (`unmappable`, not an already-categorized `unsupported_requests` gap) is offered as a "log this as a feature request?" courtesy — explicit, admin-confirmed, never automatic | `copilot._apply_feature_request_offer()`, `feature_requests.py`, `analytics.py` |
 | 5. Guided setup | One blocking question at a time; same `QuestionForm` UI component for every track | `automation/validator.py`, `apps/setup.py` |
 | 6. No regressions to existing steps | Enforced by keeping every pre-existing test assertion unchanged while adding new, additive test files per capability | `test_track_a.py`, `test_connector.py` (unchanged), new suites below |
 | 7. Test on a real conversation | Real mailbox conversations (not placeholder emails) offered as the test target, for both tracks | `mailbox_lookup.py`, `apps/setup.preview_feature()`, the `test_contact_email` choice-question |
@@ -98,12 +99,20 @@ No changes to `router.py`, either `extract.py`, `validator.py`, `plan_validator.
 - **API version pinning.** A real integration's auth is issued against one API version; every call for that connection must target that same version's endpoints, never "latest" or an inferred version. `connected_apps.api_version()` is the one place this is read from — see §9.
 - **Every automation names its enable scope.** A top-level `enabled_inboxes` slot is required the moment a real workspace is loaded, the Track B analogue of Track A's own "which shared inbox(es)" step — never left implicit or workspace-wide by default.
 - **A prerequisite gate must offer its own fix, not just name itself.** Any mechanism (recipe, native action, composed plan) that blocks on an unmet prerequisite must offer the real one-click fix when one exists (`connected_apps.PREREQUISITE_ACTIONS`) — a static "must be connected" message with nothing to click is a dead end, not a guardrail.
+- **A gate with no one-click fix must still be self-serve.** `connected_apps.PREREQUISITE_REMEDIATION`/`remediation_for()` — when the block can't be flipped by Hiver (e.g. Salesforce's Account Team/CSM setup), the error names the exact steps to clear it, never just the flag that's blocking it. `None` when no remediation text is on file yet — an honest gap, never an invented instruction.
+- **Feature-request logging is explicit, never silent.** `unmappable` asks (a genuinely novel gap — not an already-categorized `unsupported_requests` one) get a real "log this as a feature request?" yes/no question; logging only ever happens after the admin says yes. Stubbed locally (`feature_requests.py`, `analytics.py`) — no real ClickUp/Jira/Amplitude destination exists in this repo, same "mock it, never fake it" discipline as `connected_apps.json`.
 
 ## 9. Explicitly out of scope for this phase (flagged, not silently dropped)
 
 - **Live (non-mock) API clients per app** — auth flow, real endpoint calls, pagination, rate limits. The planner/guardrail layer is app-agnostic (it operates on the abstract `{object, field, where}` shape), but each app still needs its own real client before a composed plan or native action can run against production data.
 - **API documentation ingestion** — today, "showing the path for API documentation" is a manual step for whoever configures `app_catalog.py`; there is no automated discovery of an app's schema from its public API docs.
 - **Real OAuth / credential storage** — `connected_apps.json` remains a mock fixture of connection state.
+- **Known error-code diagnostics for a test-run failure.** Checked before building: every mock create op (`salesforce_mock.create_contact`, `clickup_mock.create_task`) "always succeeds" — there is no real API integration to fail with a real error code yet, so a `known_errors` lookup would have to invent codes that don't correspond to anything real. Blocked on the live API clients above existing first.
+- **Real Amplitude/ClickUp-Jira wiring.** `analytics.py`/`feature_requests.py` are local, in-memory stubs with the exact shape a real integration would need (event name + properties; app/request/why/track) — swapping either for a real destination means replacing one function's body, not any caller.
+- **Making live-validation (capability 7's test-run) a blocking gate.** Stays a courtesy shown alongside completion, per Guardrail "Track A's existing steps are frozen" above — a deliberate decision, not an oversight, revisited only as its own isolated change if ever.
+- **Real production activation.** "Enabled"/"complete" in this engine records intent only — `ui/components/FeatureCard.tsx` says so explicitly ("demo: recorded here, not actually toggled in Hiver"). Needs a real Hiver backend connection this repo doesn't have.
+- **Team rollout** (checklists, in-app agent nudges once a capability activates) and **a multi-tenant "UG"/account model** — both need a real agent-facing product surface and real account/workspace identity this single-fixture prototype doesn't have.
+- **Onboarding a third app (e.g. Asana).** Deliberately sequenced after closing gaps on the two existing apps (Salesforce, ClickUp) first, so a new app doesn't inherit gaps already known and fixed.
 
 ## 10. Testing & success criteria
 
@@ -118,14 +127,20 @@ All new capabilities ship with a pure-code, no-LLM test suite (routing/extractio
 | `test_native_action.py` | native-action mechanism (ClickUp), 6-field form, app-scoped vocab | 24/24 |
 | `test_mapping_explanation.py` | step-3 explanation, all mechanisms | 7/7 |
 | `test_real_conversation.py` | step-7 real-conversation testing, incl. ClickUp write feature | 23/23 |
+| `test_feature_request_offer.py` | Discovery's feature-request offer, self-serve remediation, example-phrasing wiring | 21/21 |
 
 No regression to any pre-existing assertion across the whole body of work. UI (`ui/lib/api.ts`, `RuleCard.tsx`, `FeatureCard.tsx`) kept in lockstep, `npx tsc --noEmit` clean.
+
+Also a golden eval set, `eval/apps-eval-set.jsonl` (12 records, graded by a small parallel harness — `apps_grader.py`/`apps_report.py`) — the first eval coverage for Track A ("Apps" panel) capabilities and the router boundary between Track A/B, not just Track B automations. See `eval/README.md`'s own "Apps set" section.
 
 ## 11. Open questions
 
 - What does "minimal config" look like for an app whose API needs OAuth scopes beyond a single connect toggle?
 - Should `plan_validator.py`'s guardrails (assignable/taggable field flags, `MAX_PLAN_STEPS`) be configurable per app, or is one global policy right for every Marketplace app?
 - How should API-documentation references actually be attached per app — a URL field in `app_catalog.py`, or a separate registry?
+- Where should a real feature request actually land (ClickUp board? Jira? a PM inbox?) once this repo has real credentials to wire `feature_requests.py` up to — needs a named destination and access before that follow-on task can start.
+- Should the feature-request offer also apply to `unsupported_requests` (already-categorized gaps like custom fields/approval flows), or stay scoped to `unmappable` only as it is today? Left narrow deliberately (§8) to avoid logging noise for gaps Hiver already knows about, but worth revisiting once real usage data exists.
+- Instrumentation is intentionally partial: only `apps_activation_feature_request_logged` is wired (`analytics.py`'s `EVENTS` class names all six the source PRD specifies). Wiring `flow_started`/`capability_mapped`/`setup_step_completed`/`test_run`/`activated` touches many more call sites across both tracks and needs its own scoped pass.
 
 ---
 
@@ -167,8 +182,14 @@ engine/
 │                                      preview_feature() (capability 7, real-data test preview)
 │
 ├── connected_apps.py             # SHARED: prerequisite/connection state + api_version() pin
-│                                    (both tracks read it; covers salesforce AND clickup)
+│                                    (both tracks read it; covers salesforce AND clickup);
+│                                    PREREQUISITE_REMEDIATION/remediation_for() — self-serve
+│                                    fix-it text for a gate with no one-click PREREQUISITE_ACTIONS
 ├── connected_apps.json           # demo fixture (starts disconnected; per-app api_version)
+├── feature_requests.py            # Discovery's "log this as a feature request?" -- in-memory,
+│                                     deduped-by-(app,request) log; no real ClickUp/Jira destination yet
+├── analytics.py                   # in-memory analytics event log; EVENTS names all 6 Amplitude
+│                                     events the Apps Activation PRD specifies, only 1 wired so far
 ├── salesforce_mock.py            # SHARED: mock Salesforce API — query()/describe_object()/
 │                                    list_objects() primitives + describe_fields()/describe_writable_fields()
 ├── salesforce_schema.py          # Track B's object/field vocabulary — DERIVED from app_catalog.py
@@ -202,7 +223,8 @@ engine/
 ├── test_native_action.py          # ClickUp native-action suite — 24/24 (6 fields, one-block form)
 ├── test_mapping_explanation.py    # step-3 explanation suite — 7/7
 ├── test_real_conversation.py      # capability 7 suite — 23/23 (2 apps' write features)
-└── README.md                      # dev changelog (through the v2.13 live-testing-fixes entry)
+├── test_feature_request_offer.py  # Discovery/remediation/example-phrasing suite — 21/21
+└── README.md                      # dev changelog (through the v2.14 Discovery-offer entry)
 ```
 
 ---

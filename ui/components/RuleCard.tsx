@@ -536,6 +536,12 @@ export default function RuleCard({
         </div>
       )}
 
+      {turn.feature_request_offer && (
+        <div className="border-b border-hairline bg-bone px-4 py-2.5">
+          <p className="text-[12.5px] text-ink-soft">{turn.feature_request_offer}</p>
+        </div>
+      )}
+
       <div key={fillKey} className="slot-filled px-4">
         <Row k="WHEN">
           {spec.trigger ? (

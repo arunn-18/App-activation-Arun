@@ -15,7 +15,7 @@ ENGINE="${ENGINE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)/engine}"
 DEST="$(cd "$(dirname "$0")/.." && pwd)/api/_engine"
 
 # dev-only: local servers, eval CLI, fixture generator, tests
-EXCLUDE="serve_api.py serve2.py serve_apps.py cli.py simulate.py test_validator.py test_connector.py test_connector_planner.py test_track_a.py test_native_action.py test_mapping_explanation.py test_real_conversation.py make_mailbox.py"
+EXCLUDE="serve_api.py serve2.py serve_apps.py cli.py simulate.py test_validator.py test_connector.py test_connector_planner.py test_track_a.py test_native_action.py test_mapping_explanation.py test_real_conversation.py test_feature_request_offer.py make_mailbox.py"
 
 # automation/ and apps/ are genuine peer packages (see engine/router.py) —
 # both travel whole, not flattened, so their `from . import schema`-style

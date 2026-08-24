@@ -740,6 +740,80 @@ feature end to end), `test_mapping_explanation.py` 7/7 unchanged. `ui/`
 row, `lib/api.ts`'s new field/type additions) typechecks clean
 (`npx tsc --noEmit`).
 
+## Discovery's feature-request offer + self-serve remediation + example phrasings (v2.14, 2026-08-24)
+
+Prompted by a separate, business-level "Apps Activation" PRD (289 onboarded
+UGs, 83 active, a 28% activation rate) describing a fuller Discovery →
+Guided setup → Live validation → Team rollout flow. A gap analysis against
+this engine found most of Guided setup and Live validation already built
+(this is exactly what capabilities 1-7 above already do); this pass closes
+the highest-confirmed gaps on the two apps that already exist (Salesforce,
+ClickUp) — deliberately NOT onboarding a third app yet, NOT making
+live-validation a blocking gate, and NOT building real production
+activation, real Amplitude/ClickUp-Jira wiring, or team rollout, all
+confirmed out of scope for this pass.
+
+**Discovery: "no match → log a feature request?"** Scoped exactly to the
+source PRD's own Escalation Trigger table row — `unmappable` specifically
+(a genuinely novel ask), not `unsupported_requests` (an already-categorized
+gap like custom fields; re-logging those would be noise, not a demand
+signal). `copilot._apply_feature_request_offer()` runs at the end of
+`_turn()`, uniformly for both tracks (Track A's own unmappable asks reach
+it via the same no-match reshape that already normalizes Track A into
+Track B's empty spec shape). A new `feature_request_requested` slot
+(boolean|null, three-state: unanswered/yes/no) on both extract schemas
+mirrors `connect_requested`'s own persistence rule. Logging is EXPLICIT —
+a real "Log this as a feature request?" yes/no choice question, rendered
+by the SAME `QuestionForm` component every other choice question already
+uses, no new UI needed — never automatic just because something didn't
+match. New `feature_requests.py` (in-memory, deduped by `(app, request)`)
+and `analytics.py` (`EVENTS` names all six events the source PRD specifies;
+only `FEATURE_REQUEST_LOGGED` is actually wired — the other five need their
+own scoped pass, flagged honestly rather than half-built silently) are
+local stubs — no real ClickUp/Jira/Amplitude destination exists in this
+repo, same "mock it, never fake it" discipline `connected_apps.json`
+already holds itself to.
+
+**Self-serve remediation for a non-one-click prerequisite.** Before this,
+`account_team_enabled` (Salesforce's Account Team/CSM setup, which has no
+mocked "enable" action) produced an honest but dead-end error — it NAMED
+the gate but never said how to clear it. New `connected_apps.
+PREREQUISITE_REMEDIATION`/`remediation_for()` supplies real fix-it
+instructions, threaded into both `automation/validator.py`'s
+`_check_connector_prerequisites()` and `apps/setup.py`'s own auth-step
+error branch — one dict, both tracks, same "shared vocabulary lives in
+connected_apps.py" precedent `PREREQUISITE_LABELS`/`PREREQUISITE_ACTIONS`
+already set.
+
+**Knowledge-layer metadata: example phrasings.** `apps/schema.py`'s
+`FEATURES` entries gained `example_phrasings` — real asks each feature
+actually matches, reused (never re-invented) by `docent.py`'s capability
+answers. Surfaced a real pre-existing gap along the way: the "Salesforce
+integration" capability answer filtered to `app == "salesforce"` only,
+so it had never once mentioned ClickUp's own Track A feature
+(`clickup_create_task_from_hiver`) despite it existing since the previous
+phase — fixed by dropping the filter now that there's a second app to
+name. A "known error codes" analogue for Track B (RECIPES/NATIVE_ACTIONS)
+was investigated and deliberately NOT built: every mock create op
+(`salesforce_mock.create_contact`, `clickup_mock.create_task`) "always
+succeeds" — there is no real API integration to fail with a real error
+code yet, so a `known_errors` dict would have had to invent codes with
+nothing real behind them. Blocked on real (non-mock) API clients existing
+first, per this file's own long-standing out-of-scope note.
+
+**Testing:** new `test_feature_request_offer.py` (21/21) — the offer/log/
+decline/dedupe flow driven through the real `copilot.respond()`/
+`respond_structured()` pipeline (router/extract stubbed, same discipline as
+every other suite here), the remediation text reaching both tracks' error
+paths, and the docent capability-answer wiring. No regressions across all
+8 suites (229 unit cases total). Also shipped alongside this phase: a
+golden eval set for Track A capabilities and the router boundary between
+tracks (`eval/apps-eval-set.jsonl`, 12 records, its own small grading
+harness) — see `eval/README.md`'s "Apps set" section; this closed a real
+coverage gap where every prior eval set only ever exercised Track B.
+`ui/lib/api.ts`'s `TurnState` and `RuleCard.tsx` updated for the new
+`feature_request_offer` field; `npx tsc --noEmit` clean.
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session

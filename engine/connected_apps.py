@@ -55,6 +55,31 @@ PREREQUISITE_ACTIONS = {
     "clickup_connected": {"label": "Connect ClickUp", "phrase": "connect clickup"},
 }
 
+# prerequisite flag -> concrete, self-serve fix-it instructions, for a gate
+# with NO entry in PREREQUISITE_ACTIONS above (nothing Hiver can flip with a
+# click — the admin has to go configure the third-party app itself). The
+# Apps Activation PRD (2026-08-24) names this explicitly: "admin told
+# exactly what's missing and how to fix it... self-serve, no handoff" — a
+# bare PREREQUISITE_LABELS string ("Account Team must be enabled with a CSM
+# role") names the GATE but not the FIX, which was a real dead end before
+# this dict existed. Every key here should be one with no PREREQUISITE_
+# ACTIONS entry; a key needing BOTH is a contradiction (fixable in one
+# click AND only fixable by hand can't both be true).
+PREREQUISITE_REMEDIATION = {
+    "account_team_enabled": (
+        "In Salesforce Setup, go to Account Teams and enable Account Teams for "
+        "your org, then assign at least one team member the 'CSM' role on the "
+        "accounts you want auto-assignment for."),
+}
+
+
+def remediation_for(prerequisite_key):
+    """Self-serve fix-it text for a prerequisite with no one-click action, or
+    None when there isn't one on file yet (an honest gap, never a fabricated
+    instruction) — see PREREQUISITE_REMEDIATION's own docstring for why this
+    is separate from PREREQUISITE_ACTIONS."""
+    return PREREQUISITE_REMEDIATION.get(prerequisite_key)
+
 
 def load(path=DEFAULT_PATH):
     return json.loads(Path(path).read_text())

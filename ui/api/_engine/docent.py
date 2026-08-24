@@ -87,8 +87,9 @@ _TOPICS = [
      "Salesforce integration splits into two things, both live today. "
      "First, App features an admin enables once per workspace — no trigger, "
      "no per-conversation automation, just config: " + "; ".join(
-         f"{f['name']} — {f['description']}" for f in apps_schema.FEATURES.values()
-         if f["app"] == "salesforce")
+         f"{f['name']} ({f['app'].title()}) — {f['description']}"
+         + (f' e.g. "{f["example_phrasings"][0]}"' if f.get("example_phrasings") else "")
+         for f in apps_schema.FEATURES.values())
      + " Second, automations that react as conversations come in — three ways "
      "I can talk to another app there, in order of how much is already built: "
      "a native action block — " + ", ".join(f"{n['name']} ({n['app']})"

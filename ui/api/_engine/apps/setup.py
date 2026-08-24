@@ -230,9 +230,14 @@ def resolve_setup(feature_id, feature_setup, apps_ws, ws=None):
         action = connected_apps.PREREQUISITE_ACTIONS.get(unmet[0])
         if action is None:
             # no one-click fix exists for this gate (e.g. an org-side config
-            # Hiver can't flip) — an honest blocker, not a fake CTA
-            return _result("invalid", errors=[f"'{f['name']}' isn't usable yet — "
-                                              + "; ".join(labels)], progress=progress)
+            # Hiver can't flip) — an honest blocker, not a fake CTA. Still
+            # self-serve where possible (Apps Activation PRD, 2026-08-24):
+            # say HOW to clear it, not just that it's blocked.
+            msg = f"'{f['name']}' isn't usable yet — " + "; ".join(labels)
+            fixes = [f for f in (connected_apps.remediation_for(p) for p in unmet) if f]
+            if fixes:
+                msg += ". To fix it yourself: " + " ".join(fixes)
+            return _result("invalid", errors=[msg], progress=progress)
         q = _question("feature_setup.connect",
                       f"{f['name']} needs {labels[0]} first. Connect it now?",
                       [{"label": action["label"], "value": action["phrase"]}])

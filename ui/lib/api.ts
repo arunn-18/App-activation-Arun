@@ -278,6 +278,12 @@ export interface TurnState {
    *  every later turn of the same conversation and whenever nothing has
    *  been matched yet. */
   mapping_explanation?: string | null;
+  /** Discovery movement's "log this as a feature request?" courtesy
+   *  (Apps Activation PRD, 2026-08-24) — set only when this turn has an
+   *  `unmappable` item: the offer question text (not yet answered), a
+   *  decline acknowledgment, or a logged confirmation, depending on
+   *  spec.feature_request_requested. null whenever nothing is unmappable. */
+  feature_request_offer?: string | null;
   /** the latest user message was a wrap-up ("that's about it"), no new content */
   closing: boolean;
   /** closing AND the rule is complete: conversation is finished */
