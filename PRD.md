@@ -1,6 +1,6 @@
 # PRD — Apps Activation: an app-agnostic capability engine
 
-**Status:** Implemented (v2.15) · **Owner:** Arun Nayak · **Last updated:** 2026-08-24
+**Status:** Implemented (v2.16) · **Owner:** Arun Nayak · **Last updated:** 2026-08-24
 **Related:** [PR #1](https://github.com/arunn-18/App-activation-Arun/pull/1) · `engine/README.md` (dev changelog)
 
 ---
@@ -71,7 +71,7 @@ A request that fits none of these — no matching `FEATURES` entry, no `NATIVE_A
 | 3. Explain the mapping | One sentence, composed only from existing schema/registry data, shown once per conversation | `copilot._mapping_explanation()`, gated by `is_first_turn` |
 | 4. Decide the bucket | Track A / Track B / neither — `unsupported_requests` when nothing fits | `automation/extract.py` rule 19, `apps/extract.py` rule 20 |
 | 4b. Discovery: no match → feature request | A genuinely novel ask (`unmappable`, not an already-categorized `unsupported_requests` gap) is offered as a "log this as a feature request?" courtesy — explicit, admin-confirmed, never automatic. Never offered on a bare capability question (already answered, nothing to build) | `copilot._apply_feature_request_offer()`, `feature_requests.py`, `analytics.py` |
-| 4c. Capability questions get real badges | A capability question's answer carries structured, clickable `FEATURES`/`RECIPES`/`NATIVE_ACTIONS` entries alongside the prose — never a misleading "rule built" card for a question that built nothing | `docent.relevant_capabilities()`, `CapabilityBadges.tsx` |
+| 4c. Capability questions get real badges | A capability question's answer carries structured, clickable `FEATURES`/`RECIPES`/`NATIVE_ACTIONS` entries alongside the prose — never a misleading "rule built" card for a question that built nothing. Both the badges AND the prose answer are scoped to whichever app was actually named (`docent._integration_answer()`), and neither the card nor a lingering "what should happen when this fires?" form can leak through, gated on `actions` being empty rather than `trigger` (which gets a rule-4 default fill even for a bare question) | `docent.relevant_capabilities()`, `docent._integration_answer()`, `CapabilityBadges.tsx` |
 | 5. Guided setup | One blocking question at a time; same `QuestionForm` UI component for every track | `automation/validator.py`, `apps/setup.py` |
 | 6. No regressions to existing steps | Enforced by keeping every pre-existing test assertion unchanged while adding new, additive test files per capability | `test_track_a.py`, `test_connector.py` (unchanged), new suites below |
 | 7. Test on a real conversation | Real mailbox conversations (not placeholder emails) offered as the test target, for both tracks | `mailbox_lookup.py`, `apps/setup.preview_feature()`, the `test_contact_email` choice-question |
@@ -128,7 +128,7 @@ All new capabilities ship with a pure-code, no-LLM test suite (routing/extractio
 | `test_native_action.py` | native-action mechanism (ClickUp), 6-field form, app-scoped vocab | 24/24 |
 | `test_mapping_explanation.py` | step-3 explanation, all mechanisms | 7/7 |
 | `test_real_conversation.py` | step-7 real-conversation testing, incl. ClickUp write feature | 23/23 |
-| `test_feature_request_offer.py` | Discovery's feature-request offer, self-serve remediation, example-phrasing wiring, capability-question suppression + badges | 23/23 |
+| `test_feature_request_offer.py` | Discovery's feature-request offer, self-serve remediation, example-phrasing wiring, capability-question suppression + app-scoped badges/prose | 26/26 |
 
 No regression to any pre-existing assertion across the whole body of work. UI (`ui/lib/api.ts`, `RuleCard.tsx`, `FeatureCard.tsx`, `CapabilityBadges.tsx`) kept in lockstep, `npx tsc --noEmit` clean.
 

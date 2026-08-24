@@ -858,6 +858,50 @@ regression case plus a badges assertion on the same turn (23/23). No
 regressions across all 8 suites (236 unit cases). `npx tsc --noEmit`
 clean.
 
+## Capability answers stay scoped to the app actually asked about (v2.16, 2026-08-24)
+
+v2.15's fix wasn't the whole story — live testing found two more problems
+from the same root cause. Asking "what are the capabilities of ClickUp
+integration in Hiver?" got badges correctly scoped to ClickUp, but (a) the
+PROSE answer still opened with "Salesforce integration splits into two
+things..." (the OLD static `_TOPICS` text, never actually app-scoped —
+`relevant_capabilities()`'s scoping only ever touched the badges, not the
+answer sitting right next to them) and (b) a lingering "Question 2 of 3"
+form ("What should happen when this fires...?") still rendered under the
+answer, because v2.15's `hasRuleCard()` fix keyed off `spec.trigger` being
+null as its "nothing was built" signal — but `automation/extract.py`'s own
+rule 4 default-fills a best-guess trigger (`new_conversation_inbound`) even
+for a bare question with no email context at all, so a truthy trigger
+was never a reliable signal to begin with.
+
+**The prose answer is now genuinely app-scoped.** `docent._integration_
+answer(topic)` replaces the old static text — same app-detection logic
+`relevant_capabilities()` already used, now driving the PROSE too so it can
+never drift out of sync with the badges sitting next to it. Naming only
+ClickUp returns ONLY ClickUp's Track A feature and native action (no
+Salesforce recipe, no Salesforce-lookup paragraph); naming only Salesforce
+returns only Salesforce's; naming neither covers both, matching the old
+text's own all-apps behavior. The generic "everything else isn't yet"
+trailer stays shared across all scopes on purpose — it's describing what
+categories of ask aren't supported at all, not claiming a capability for
+whichever app was named.
+
+**The lingering questionnaire is fixed by dropping trigger as a signal
+entirely.** Both `copilot.py`'s engine-side suppression (added in v2.15)
+and `ui/lib/api.ts`'s `hasRuleCard()` now gate purely on `actions` being
+empty — never on `trigger`. Unlike trigger, `actions` never gets a
+default-filled value (even a vague "tag it appropriately" still produces
+a real, if incomplete, action entry per extract.py's own rule 5), so an
+empty list is the one honest "nothing was actually attempted" signal
+across both the Python and TypeScript sides.
+
+**Testing:** `test_feature_request_offer.py`'s capability-question
+regression case now scripts the exact failure mode (a spuriously-defaulted
+trigger, genuinely empty actions) rather than a null trigger, and gained
+assertions for the app-scoped prose, no cross-app badge leakage, and the
+questionnaire staying suppressed (26/26). No regressions across all 8
+suites (239 unit cases). `npx tsc --noEmit` clean.
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session

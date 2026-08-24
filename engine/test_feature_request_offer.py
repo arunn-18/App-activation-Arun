@@ -176,7 +176,14 @@ def run():
     # already-answered question was confusing, not a courtesy.
     def _fake_capability_question_extract(client, messages, model=None, ws=None,
                                           on_event=None, app=None):
-        return {"trigger": None, "scope_confirmed": None, "condition_groups": [], "actions": [],
+        # trigger is a (spuriously) filled default here on purpose -- rule
+        # 4's own default-trigger behavior means a bare capability question
+        # can still get a best-guess trigger filled even with no email
+        # context at all, which is exactly what a live test hit. actions
+        # stays genuinely empty (nothing was ever attempted), which is the
+        # ONLY signal the fix is allowed to rely on.
+        return {"trigger": "new_conversation_inbound", "scope_confirmed": True,
+                "condition_groups": [], "actions": [],
                 "ai_extract": None, "unsupported_requests": [], "closing": False,
                 "capability_question": None, "no_intent": None,
                 "unmappable": [{"request": "What all capabilities does Clickup Integration in Hiver provide?",
@@ -210,6 +217,24 @@ def run():
           "(docent.relevant_capabilities()) alongside the prose answer",
           any(b["id"] == "clickup_create_task_from_hiver" for b in s6["capability_badges"])
           and any(b["id"] == "clickup_create_task" for b in s6["capability_badges"]))
+    check("no ClickUp-scoped question also gets Salesforce's badges leaking in",
+          not any(b["app"] == "salesforce" for b in s6["capability_badges"]))
+    check("the prose answer itself is ClickUp-scoped -- never opens with "
+          "Salesforce for a question that only ever named ClickUp (the "
+          "generic 'everything else isn't yet' trailer can still name "
+          "Salesforce as the one existing recipe when describing what a "
+          "connector_other escalation generally looks like -- that's not "
+          "claiming a ClickUp capability, just explaining the category)",
+          "ClickUp" in s6["capability_answer"]
+          and not s6["capability_answer"].startswith("Salesforce")
+          and "Create a Task from Hiver" in s6["capability_answer"]
+          and "Create a Contact from Hiver" not in s6["capability_answer"])
+    check("a spuriously-defaulted trigger (rule 4's own default, not a real "
+          "ask) must NOT keep the 'what should happen when this fires?' "
+          "question alive once actions stays genuinely empty -- the exact "
+          "live bug (a lingering 'Question 2 of 3' form under the answer)",
+          s6["questions_structured"] == [] and s6["questions"] == []
+          and s6["questions_pending"] == 0)
 
     # ---- self-serve remediation: a non-one-click prerequisite says HOW -----
     check("connected_apps.remediation_for names a real prerequisite's fix",

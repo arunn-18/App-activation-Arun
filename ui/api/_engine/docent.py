@@ -84,27 +84,62 @@ _TOPICS = [
      "the set."),
     (("integrat", "connector", "salesforce", "hubspot", "clickup", "custom field",
       "custom object", "approval", "sla", "webhook", "api"),
-     "Salesforce integration splits into two things, both live today. "
-     "First, App features an admin enables once per workspace — no trigger, "
-     "no per-conversation automation, just config: " + "; ".join(
-         f"{f['name']} ({f['app'].title()}) — {f['description']}"
-         + (f' e.g. "{f["example_phrasings"][0]}"' if f.get("example_phrasings") else "")
-         for f in apps_schema.FEATURES.values())
-     + " Second, automations that react as conversations come in — three ways "
-     "I can talk to another app there, in order of how much is already built: "
-     "a native action block — " + ", ".join(f"{n['name']} ({n['app']})"
-                                            for n in schema.NATIVE_ACTIONS.values())
-     + " — is Hiver's own pre-built integration, no lookups involved. A ready-made "
-     "recipe — " + next(iter(schema.RECIPES.values()))["name"] + " — "
-     + next(iter(schema.RECIPES.values()))["description"] + " Beyond those, I can "
-     "also compose a Salesforce lookup on the fly for other asks that fit the same shape "
-     "— look up data about the sender's Account/Contact/Opportunity/Case, then assign or "
-     "tag the conversation based on it (e.g. assign to the Account Owner instead of the "
-     "CSM, or tag by a Case's priority) — verified with a real test run before it counts "
-     "as done, never just assumed to work. Everything else here isn't yet: "
-     + "; ".join(schema.UNSUPPORTED.values())
-     + ". I'll always say so rather than fake one of these."),
+     None),  # composed by _integration_answer() below, scoped to the app(s) named
 ]
+
+
+def _integration_answer(t):
+    """The "integrat" topic's answer, scoped to whichever real app(s) the
+    topic names — a live test found the OLD static text always opening with
+    "Salesforce integration splits into two things..." even for a question
+    that only ever named ClickUp, which read as flatly wrong (and buried the
+    one real ClickUp capability the question was actually about three
+    sentences later). Same "answer only from schema.py" discipline as the
+    rest of this file; the only thing that changed is WHICH schema entries
+    get read, using the exact same app-detection `relevant_capabilities()`
+    already does, so the prose and the badges are never scoped differently
+    from each other."""
+    named_apps = [a for a in _KNOWN_APPS if a in t]
+    apps_to_cover = named_apps or list(_KNOWN_APPS)
+
+    def _disp(app):
+        return _APP_DISPLAY_NAMES.get(app, app.title())
+
+    parts = []
+    feats = [f for f in apps_schema.FEATURES.values() if f["app"] in apps_to_cover]
+    if feats:
+        parts.append(
+            "App features an admin enables once per workspace — no trigger, "
+            "no per-conversation automation, just config: " + "; ".join(
+                f"{f['name']} ({_disp(f['app'])}) — {f['description']}"
+                + (f' e.g. "{f["example_phrasings"][0]}"' if f.get("example_phrasings") else "")
+                for f in feats) + ".")
+
+    natives = [n for n in schema.NATIVE_ACTIONS.values() if n["app"] in apps_to_cover]
+    recipes = [r for r in schema.RECIPES.values() if r["app"] in apps_to_cover]
+    b_parts = []
+    if natives:
+        b_parts.append("a native action block — " + ", ".join(
+            f"{n['name']} ({_disp(n['app'])})" for n in natives)
+            + " — Hiver's own pre-built integration, no lookups involved")
+    if recipes:
+        b_parts.append("; ".join(
+            f"a ready-made recipe — {r['name']} — {r['description']}" for r in recipes))
+    if "salesforce" in apps_to_cover:
+        b_parts.append(
+            "I can also compose a Salesforce lookup on the fly for other asks that fit "
+            "the same shape — look up data about the sender's Account/Contact/"
+            "Opportunity/Case, then assign or tag the conversation based on it (e.g. "
+            "assign to the Account Owner instead of the CSM, or tag by a Case's "
+            "priority) — verified with a real test run before it counts as done, "
+            "never just assumed to work")
+    if b_parts:
+        parts.append("Automations that react as conversations come in: "
+                     + "; ".join(b_parts) + ".")
+
+    parts.append("Everything else here isn't yet: " + "; ".join(schema.UNSUPPORTED.values())
+                 + ". I'll always say so rather than fake one of these.")
+    return " ".join(parts)
 
 
 def answer(topic):
@@ -113,8 +148,10 @@ def answer(topic):
     t = re.sub(r"\s+", " ", str(topic or "")).strip().lower()
     if not t:
         return _OVERVIEW
+    if any(k in t for k in _INTEGRATION_KEYS):
+        return _integration_answer(t)
     for keys, text in _TOPICS:
-        if any(k in t for k in keys):
+        if text is not None and any(k in t for k in keys):
             return text
     return _OVERVIEW
 
@@ -129,6 +166,11 @@ def answer(topic):
 _INTEGRATION_KEYS = ("integrat", "connector", "salesforce", "hubspot", "clickup",
                     "custom field", "custom object", "approval", "sla", "webhook", "api")
 _KNOWN_APPS = ("salesforce", "clickup")
+# display casing for prose ("ClickUp", not "clickup".title() == "Clickup") —
+# same small local override apps/setup.py's own APP_DISPLAY_NAMES uses, kept
+# here rather than imported to avoid pulling apps.setup's clickup_mock/
+# salesforce_mock/connected_apps/workspace imports into a pure prose module.
+_APP_DISPLAY_NAMES = {"salesforce": "Salesforce", "clickup": "ClickUp"}
 
 
 def relevant_capabilities(topic):

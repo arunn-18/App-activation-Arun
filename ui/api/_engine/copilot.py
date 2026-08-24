@@ -717,6 +717,28 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None, app=None):
     result["feature_request_offer"] = _apply_feature_request_offer(
         spec, result, app, route["track"])
 
+    # A live test found this: a bare capability question with NOTHING else
+    # built was still surfacing the automation validator's own "what's
+    # missing" questions ("what should happen when this fires?"), as if the
+    # question were a half-started rule the admin forgot to finish, right
+    # below docent.py's own answer to that exact question on the SAME turn.
+    # Gated on `actions` being empty, NOT on `trigger` being null — rule 4's
+    # own default-trigger behavior means trigger gets a best-guess fill
+    # ("new_conversation_inbound") even for a bare question with no email
+    # context at all, so it's not a reliable "nothing was built" signal;
+    # `actions` never gets defaulted this way (even a vague ask like "tag it
+    # appropriately" still produces a real, if incomplete, action entry per
+    # rule 5), so an empty list is the honest tell. A capability question
+    # asked MID-FLOW, on top of genuine accumulated progress (real actions,
+    # or an in-progress Track A feature), still surfaces that progress's own
+    # real questions unchanged, per the "read-only, doesn't erase existing
+    # progress" rule this classification already follows everywhere else.
+    if (spec.get("capability_question") and result.get("feature_request") is None
+            and not (spec.get("actions") or [])):
+        result["questions"] = []
+        result["questions_structured"] = []
+        result["questions_pending"] = 0
+
     # capability questions: the model only classifies (router.py); the answer
     # is composed in code from schema.py so nothing unbuildable is ever
     # taught. A question is never a closing.

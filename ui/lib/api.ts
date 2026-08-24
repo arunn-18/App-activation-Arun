@@ -586,15 +586,20 @@ export function hasQuestionForm(t: TurnState): boolean {
  *  never a RuleCard, since spec.trigger/actions are intentionally empty for
  *  those (Track A has no trigger, no actions; see engine/extract.py rule 20).
  *
- *  Also prose-only for a BARE capability question that built nothing (no
- *  trigger, no actions) — a live test found this rendering a misleading
- *  RuleCard with an "excluded" question in it, for a turn that was really
- *  just a question docent.py already answered in full. A question that
- *  ALSO adds real rule content (e.g. "what does assignment support, also
- *  tag emails from acme as VIP") still gets its card — only "nothing was
- *  built" is the tell, not "a question was asked". */
+ *  Also prose-only for a BARE capability question that built nothing — a
+ *  live test found this rendering a misleading RuleCard with an "excluded"
+ *  question in it, for a turn that was really just a question docent.py
+ *  already answered in full. Gated on `actions` alone, NOT `trigger` —
+ *  automation/extract.py's own rule 4 default-fills a best-guess trigger
+ *  even for a bare question with no email context at all, so a truthy
+ *  trigger is not a reliable "something was built" signal; `actions` never
+ *  gets defaulted that way (see copilot.py's matching engine-side
+ *  suppression for the same reasoning). A question that ALSO adds a real
+ *  action (e.g. "what does assignment support, also tag emails from acme as
+ *  VIP") still gets its card — only "no actions at all" is the tell, not "a
+ *  question was asked". */
 export function hasRuleCard(t: TurnState): boolean {
-  const builtNothing = !t.spec.trigger && t.spec.actions.length === 0;
+  const builtNothing = t.spec.actions.length === 0;
   if (t.capability_answer && builtNothing) return false;
   return (
     t.track !== "feature" &&
