@@ -814,6 +814,50 @@ coverage gap where every prior eval set only ever exercised Track B.
 `ui/lib/api.ts`'s `TurnState` and `RuleCard.tsx` updated for the new
 `feature_request_offer` field; `npx tsc --noEmit` clean.
 
+## Capability questions stop faking a rule, and gain real badges (v2.15, 2026-08-24)
+
+Live testing on v2.14 immediately surfaced two problems from one root
+cause: asking "what all capabilities does ClickUp integration provide?"
+(a) got the new feature-request offer attached to it (fixed same-day, see
+below) and (b), more fundamentally, rendered an "AUTOMATION RULE" card
+with a "Built with 1 exclusion" badge — as if the question were a failed
+attempt to build a rule, when it was just a question `docent.py` already
+answered in full on the same turn.
+
+**Root cause, fixed at the source.** `automation/extract.py` rule 16 and
+`apps/extract.py` rule 8 (the `unmappable` rules) never told the model
+that a BARE capability question isn't a "requirement the vocabulary can't
+express" — it's a meta-question about the builder, already covered
+upstream by `capability_question`, with nothing to build at all. Both
+rules now say so explicitly. `ui/lib/api.ts`'s `hasRuleCard()` also gained
+a defense-in-depth check (nothing built + a capability question this
+turn -> no card), since a stale extractor response or an unusual model
+run could still produce the same shape.
+
+**New: structured capability badges, not just prose.** The user's actual
+ask: "whenever I ask the capability question, I should get badges with
+the relevant capabilities." New `docent.relevant_capabilities(topic)` —
+the structured sibling of `answer()`, same "compose only from schema.py,
+never invent" discipline — returns the real `FEATURES`/`RECIPES`/
+`NATIVE_ACTIONS` entries a topic is actually about (scoped to whichever
+app the topic names, e.g. "clickup integration" -> only ClickUp's two
+entries; no app named -> every app's, matching `answer()`'s own
+all-apps text). Threaded through `copilot.respond_structured()` as
+`capability_badges`, rendered by a new shared `CapabilityBadges.tsx`
+component on both pages — clicking a badge sends its own name as the next
+message, the same "bare capability name routes correctly" discipline the
+Apps panel's suggestion chips already established. Topics with no discrete
+capability (assignment, triggers, conditions — generic rule-building
+primitives, not catalogued entries) correctly get `[]`, never an invented
+badge.
+
+**Testing:** `test_validator.py`'s docent section gained 5 new cases for
+`relevant_capabilities()` (app-scoped, all-apps, and empty-for-generic-
+topics); `test_feature_request_offer.py` gained the capability-question
+regression case plus a badges assertion on the same turn (23/23). No
+regressions across all 8 suites (236 unit cases). `npx tsc --noEmit`
+clean.
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session

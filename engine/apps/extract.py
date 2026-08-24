@@ -91,7 +91,10 @@ EXTRACTION RULES:
 8. unmappable: when the ask genuinely doesn't match any APP FEATURES entry despite
    being an app-setup-shaped request — record {{request: <user's own words>,
    why: <what is missing>}}, leave `feature` null. Never bend a mismatched ask into
-   the nearest feature to make it fit.
+   the nearest feature to make it fit. Never record a bare capability QUESTION
+   here either ("what can this show?") — capability_question (classified
+   separately, upstream) already covers it; unmappable is for a real setup ask
+   with no matching feature, not a meta-question with nothing to configure.
 9. feature_request_requested: true the moment the user agrees to log an unmappable
    ask as a feature request (answers "yes"/"log it"/"please" to the copilot's own
    offer, or says so unprompted); false the moment they explicitly decline ("no

@@ -117,3 +117,49 @@ def answer(topic):
         if any(k in t for k in keys):
             return text
     return _OVERVIEW
+
+
+# keywords for the ONE topic that names discrete, badge-able capabilities —
+# same list _TOPICS' own "integrat" entry routes on. Every other topic
+# (assignment, triggers, conditions, tags, statuses, notes, AI variables) is
+# a generic rule-building PRIMITIVE, not a catalogued FEATURES/RECIPES/
+# NATIVE_ACTIONS entry with its own id — there is nothing honest to badge
+# there, so relevant_capabilities() returns [] for those on purpose rather
+# than inventing a badge.
+_INTEGRATION_KEYS = ("integrat", "connector", "salesforce", "hubspot", "clickup",
+                    "custom field", "custom object", "approval", "sla", "webhook", "api")
+_KNOWN_APPS = ("salesforce", "clickup")
+
+
+def relevant_capabilities(topic):
+    """Structured capability badges for a capability-question topic — the
+    same 'answer only from schema.py, never invent' discipline as answer()
+    itself, just structured (id/name/app/kind) instead of prose, so a UI can
+    render real, clickable capability chips instead of (or alongside) a
+    misleading 'this turn built a rule' card for what was actually just a
+    question. A live test asked for exactly this: asking about ClickUp's
+    capabilities got a RuleCard with an 'excluded' question in it, instead
+    of anything naming the real capabilities that answer the question.
+
+    Scoped to whichever real app(s) the topic names (e.g. "clickup
+    integration" -> only ClickUp's entries); no app named -> every app's
+    entries, same as answer()'s own "integrat" text covering all of them."""
+    t = re.sub(r"\s+", " ", str(topic or "")).strip().lower()
+    if not any(k in t for k in _INTEGRATION_KEYS):
+        return []
+    named_apps = [a for a in _KNOWN_APPS if a in t]
+
+    def _matches(app):
+        return not named_apps or app in named_apps
+
+    badges = []
+    for fid, f in apps_schema.FEATURES.items():
+        if _matches(f["app"]):
+            badges.append({"id": fid, "name": f["name"], "app": f["app"], "kind": "app_feature"})
+    for rid, r in schema.RECIPES.items():
+        if _matches(r["app"]):
+            badges.append({"id": rid, "name": r["name"], "app": r["app"], "kind": "recipe"})
+    for nid, n in schema.NATIVE_ACTIONS.items():
+        if _matches(n["app"]):
+            badges.append({"id": nid, "name": n["name"], "app": n["app"], "kind": "native_action"})
+    return badges

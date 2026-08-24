@@ -197,6 +197,11 @@ EXTRACTION RULES:
    without it. NEVER bend such a request into a different property to make it
    fit ("has tag VIP" is NOT status is VIP) — a wrong condition that looks legal
    is far worse than a declared gap, because the user cannot see it is wrong.
+   NEVER record a bare capability QUESTION here either ("what can this show?",
+   "what integrations exist?") — that is a question about the builder, not a
+   requirement for THIS rule. capability_question (classified separately,
+   upstream) already covers it; unmappable is for a real ask the rule vocabulary
+   can't express, not a meta-question with nothing to build.
 17. State conditions (tag / assignee / status) describe the conversation as it
    ALREADY IS, so they exist ONLY on reply and state-change triggers, never on
    the new-conversation ones. "a follow-up on a conversation tagged VIP" =

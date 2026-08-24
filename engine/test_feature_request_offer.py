@@ -206,6 +206,10 @@ def run():
           and s6["feature_request_offer"] is None
           and not any(q["slot"] == "feature_request_offer" for q in s6["questions_structured"])
           and feature_requests.all_requests() == [])
+    check("the SAME turn carries structured, badge-able ClickUp capabilities "
+          "(docent.relevant_capabilities()) alongside the prose answer",
+          any(b["id"] == "clickup_create_task_from_hiver" for b in s6["capability_badges"])
+          and any(b["id"] == "clickup_create_task" for b in s6["capability_badges"]))
 
     # ---- self-serve remediation: a non-one-click prerequisite says HOW -----
     check("connected_apps.remediation_for names a real prerequisite's fix",

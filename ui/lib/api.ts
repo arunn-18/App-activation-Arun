@@ -265,6 +265,13 @@ export interface TurnState {
   /** schema-grounded answer when the user asked what the builder can do;
    *  the turn is read-only — the draft rule is unchanged */
   capability_answer?: string | null;
+  /** structured, clickable capabilities the SAME question is actually
+   *  about (engine/docent.py's relevant_capabilities()) — [] whenever the
+   *  topic doesn't name discrete capabilities (e.g. "how does assignment
+   *  work?" has no single badge-able entry) or there's no capability
+   *  question this turn. Always [] alongside a null capability_answer. */
+  capability_badges?: { id: string; name: string; app: string;
+                        kind: "app_feature" | "recipe" | "native_action" }[];
   /** requirements the rule vocabulary genuinely cannot express — declared,
    *  never approximated into a nearest-looking legal property */
   unmappable?: { request: string; why: string }[];
@@ -577,8 +584,18 @@ export function hasQuestionForm(t: TurnState): boolean {
  *  asked about. Gibberish turns render as prose only. Track A turns (an
  *  app_feature ask) render a FeatureCard instead — see hasFeatureCard —
  *  never a RuleCard, since spec.trigger/actions are intentionally empty for
- *  those (Track A has no trigger, no actions; see engine/extract.py rule 20). */
+ *  those (Track A has no trigger, no actions; see engine/extract.py rule 20).
+ *
+ *  Also prose-only for a BARE capability question that built nothing (no
+ *  trigger, no actions) — a live test found this rendering a misleading
+ *  RuleCard with an "excluded" question in it, for a turn that was really
+ *  just a question docent.py already answered in full. A question that
+ *  ALSO adds real rule content (e.g. "what does assignment support, also
+ *  tag emails from acme as VIP") still gets its card — only "nothing was
+ *  built" is the tell, not "a question was asked". */
 export function hasRuleCard(t: TurnState): boolean {
+  const builtNothing = !t.spec.trigger && t.spec.actions.length === 0;
+  if (t.capability_answer && builtNothing) return false;
   return (
     t.track !== "feature" &&
     (!t.no_intent || Boolean(t.spec.trigger) || t.spec.actions.length > 0)

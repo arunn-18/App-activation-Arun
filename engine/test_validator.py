@@ -245,6 +245,28 @@ def run():
     check("docent: unknown topic gets the overview",
           docent.answer("quantum entanglement") == docent.answer(""))
 
+    # ---- docent.relevant_capabilities(): the structured sibling of answer()
+    b = docent.relevant_capabilities("clickup integration")
+    check("relevant_capabilities scoped to ClickUp names only ClickUp entries",
+          b and all(x["app"] == "clickup" for x in b)
+          and any(x["id"] == "clickup_create_task_from_hiver" and x["kind"] == "app_feature"
+                  for x in b)
+          and any(x["id"] == "clickup_create_task" and x["kind"] == "native_action" for x in b))
+    b2 = docent.relevant_capabilities("salesforce integration")
+    check("relevant_capabilities scoped to Salesforce names only Salesforce entries, "
+          "including the recipe",
+          b2 and all(x["app"] == "salesforce" for x in b2)
+          and any(x["kind"] == "recipe" for x in b2))
+    b3 = docent.relevant_capabilities("what integrations do you support")
+    check("no app named -> every app's entries, same scope answer()'s own text covers",
+          {x["app"] for x in b3} == {"salesforce", "clickup"})
+    check("a non-integration topic has no discrete capability to badge -- "
+          "empty, not invented",
+          docent.relevant_capabilities("assignment options") == []
+          and docent.relevant_capabilities("what triggers exist") == [])
+    check("no topic at all -> no badges",
+          docent.relevant_capabilities(None) == [] and docent.relevant_capabilities("") == [])
+
     # ---- preview dry-run: deterministic matcher over the mailbox fixture
     import preview as pv
     box = pv.load_mailbox()

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
+import CapabilityBadges from "@/components/CapabilityBadges";
 import FeatureCard from "@/components/FeatureCard";
 import QuestionForm from "@/components/QuestionForm";
 import RuleCard from "@/components/RuleCard";
@@ -481,6 +482,16 @@ export default function Playground() {
                     <div className="ml-auto w-fit max-w-[80%] whitespace-pre-wrap rounded-2xl bg-brand px-4 py-2 text-[13.5px] leading-relaxed text-white">
                       {m.content}
                     </div>
+                  )}
+                  {m.role === "assistant" &&
+                    i !== animateIdx &&
+                    session.work[i]?.turn &&
+                    (session.work[i].turn!.capability_badges?.length ?? 0) > 0 && (
+                    <CapabilityBadges
+                      badges={session.work[i].turn!.capability_badges!}
+                      onTry={send}
+                      disabled={busy}
+                    />
                   )}
                   {m.role === "assistant" &&
                     i !== animateIdx &&

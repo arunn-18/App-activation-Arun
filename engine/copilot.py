@@ -760,6 +760,13 @@ def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
         "test_run": connector_test_run(spec) if complete and feature_result is None else None,
         "capability_answer": (docent.answer(spec["capability_question"])
                               if spec.get("capability_question") else None),
+        # structured, badge-able capabilities for the SAME question — a
+        # live test found a bare capability question rendering a misleading
+        # RuleCard with an "excluded" question in it instead of anything
+        # naming what actually answers the question; see docent.
+        # relevant_capabilities()'s own docstring.
+        "capability_badges": (docent.relevant_capabilities(spec["capability_question"])
+                              if spec.get("capability_question") else []),
         "no_intent": spec.get("no_intent") or None,
         "mapping_explanation": spec.get("mapping_explanation"),
         "feature_request_offer": result.get("feature_request_offer"),
