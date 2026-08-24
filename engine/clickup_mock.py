@@ -22,11 +22,25 @@ import itertools
 _task_ids = itertools.count(1001)
 
 
-def create_task(list_name, title):
+def create_task(list_name, title, description=None, assignee=None, due_date=None,
+                priority=None):
     """Mock 'create a task' call. Always succeeds in this prototype (there
     is no real ClickUp org to reject an unknown list against) — returns a
-    real-shaped response {"id", "list", "name", "url"} so a test-run capture
-    looks like what production would actually show, not an ad hoc double."""
+    real-shaped response {"id", "list", "name", "url", ...} so a test-run
+    capture looks like what production would actually show, not an ad hoc
+    double. description/assignee/due_date/priority are genuinely OPTIONAL —
+    a ClickUp task doesn't need any of them to exist, only a list and a
+    title — so each is included in the response only when actually given,
+    never as a fake empty placeholder."""
     task_id = next(_task_ids)
-    return {"id": f"CU-{task_id}", "list": list_name, "name": title,
+    task = {"id": f"CU-{task_id}", "list": list_name, "name": title,
             "url": f"https://app.clickup.com/t/{task_id}"}
+    if description:
+        task["description"] = description
+    if assignee:
+        task["assignee"] = assignee
+    if due_date:
+        task["due_date"] = due_date
+    if priority:
+        task["priority"] = priority
+    return task

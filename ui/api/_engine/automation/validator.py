@@ -77,6 +77,33 @@ def _check_connector_prerequisites(apps_ws, action, ai, name, app, prerequisite_
     return True
 
 
+def _native_action_form(ai, action):
+    """capability 5's "one block" field form: EVERY native-action field (2
+    load-bearing, 4 optional) presented together as ONE question, instead
+    of the old one-question-per-missing-param sequence (a live test asked
+    for exactly this). Submitting composes ONE chat message naming
+    whichever fields were filled — the SAME extraction rule (19a)
+    re-parses it next turn, so this is a UI convenience over the existing
+    provenance-guarded pipeline, not a parallel one. Already-known values
+    are pre-filled so re-showing the form (e.g. after a prerequisite gate
+    clears) doesn't lose what was already said."""
+    params = schema.ACTIONS["connector"]["params"]
+    fields = []
+    for pname, required in (("target_name", True), ("title_hint", True),
+                            ("description_hint", False), ("assignee_name", False),
+                            ("due_date_hint", False), ("priority_hint", False)):
+        pparam = params[pname]
+        field = {"key": pname, "label": pparam["question"], "required": required,
+                 "value": action.get(pname) or ""}
+        if pparam.get("enum"):
+            field["kind"] = "choice"
+            field["options"] = [{"label": v, "value": v} for v in pparam["enum"]]
+        fields.append(field)
+    return {"slot": f"actions[{ai}].__native_action_fields",
+            "question": "Let's fill in the task's details.",
+            "kind": "form", "fields": fields}
+
+
 def _test_email_question(ai):
     """The test_contact_email question for a connector action — offered as a
     CHOICE of real mailbox conversations whose sender is a known Salesforce
@@ -678,14 +705,8 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
                                               native["app"], native["prerequisites"],
                                               errors, missing):
                 continue
-            needs_param = False
-            for pname in ("target_name", "title_hint"):
-                if not action.get(pname):
-                    needs_param = True
-                    pparam = schema.ACTIONS["connector"]["params"][pname]
-                    missing.append({"slot": f"actions[{ai}].{pname}",
-                                    "question": pparam["question"]})
-            if needs_param:
+            if not action.get("target_name") or not action.get("title_hint"):
+                missing.append(_native_action_form(ai, action))
                 continue
             proof = executor.run_native_action(action["native_action_id"], action)
             if proof["status"] != "ok":
@@ -799,6 +820,24 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
                 f"I set aside '{h['value']}' — I couldn't confirm it from your "
                 f"message, so it's not in the rule.")
 
+    # ---- enabled_inboxes: which shared inbox(es) this RULE runs in — a
+    # property of the whole rule, asked once everything else about it is
+    # resolved (rank() below gives it the same "the rest" tier as most other
+    # questions, so it naturally comes after trigger/scope/conflicts but
+    # isn't held hostage behind them either). Skipped entirely when ws is
+    # None (eval/CLI runs, or before the Automations-panel demo loads its
+    # fixture) — same "no workspace context, no workspace-shaped questions"
+    # stance entity resolution and the connector prerequisite check already
+    # take. Every automation needs this eventually — a rule doesn't run
+    # workspace-wide any more than a Track A feature does.
+    if ws is not None and not spec.get("enabled_inboxes"):
+        missing.append({
+            "slot": "enabled_inboxes",
+            "question": "Which shared inbox(es) should this automation be enabled for?",
+            "kind": "choice", "options": _entity_options(ws, "inbox"),
+            "multiple": True, "allow_other": False, "other_hint": "",
+        })
+
     # ---- plan questions: trigger, then structural conflicts, then scope, then rest
     def rank(m):
         if m["slot"] == "trigger":
@@ -818,6 +857,7 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
                 "multiple": bool(m.get("multiple")),
                 "allow_other": bool(m.get("allow_other")) or m.get("kind", "text") == "text",
                 "other_hint": m.get("other_hint", ""),
+                "fields": m.get("fields", []),
             })
             qseen.add(m["question"])
 

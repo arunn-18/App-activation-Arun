@@ -92,8 +92,13 @@ def _render_action(a):
     if t == "connector":
         native = automation_schema.NATIVE_ACTIONS.get(a.get("native_action_id"))
         if native:
-            return (f"run native action — {native['name']}, "
-                    f"target {need(a.get('target_name'))}, titled {need(a.get('title_hint'))}")
+            line = (f"run native action — {native['name']}, "
+                   f"target {need(a.get('target_name'))}, titled {need(a.get('title_hint'))}")
+            optional = [(label, a.get(key)) for label, key in (
+                ("description", "description_hint"), ("assignee", "assignee_name"),
+                ("due", "due_date_hint"), ("priority", "priority_hint"))]
+            extras = ", ".join(f"{label} {v}" for label, v in optional if v)
+            return f"{line}, {extras}" if extras else line
         recipe = automation_schema.RECIPES.get(a.get("recipe"))
         plan = a.get("custom_plan")
         if recipe:
@@ -155,6 +160,9 @@ def render_structure(spec):
             f"{i}. {_render_action(a)}" for i, a in enumerate(acts, 1)))
     else:
         lines.append("THEN  " + MISSING)
+    inboxes = spec.get("enabled_inboxes") or []
+    if inboxes:
+        lines.append("ENABLED FOR  " + ", ".join(inboxes))
     return "\n".join(lines)
 
 
@@ -211,6 +219,10 @@ def to_final_json(spec):
                 "native_action_id": a.get("native_action_id"),
                 "target_name": a.get("target_name") if native else None,
                 "title_hint": a.get("title_hint") if native else None,
+                "description_hint": a.get("description_hint") if native else None,
+                "assignee_name": a.get("assignee_name") if native else None,
+                "due_date_hint": a.get("due_date_hint") if native else None,
+                "priority_hint": a.get("priority_hint") if native else None,
                 "custom_plan": plan,
                 "test_contact_email": a.get("test_contact_email"),
                 "assigns_to": terminal["value"] if terminal and terminal["kind"] == "assign" else None,
@@ -237,7 +249,8 @@ def to_final_json(spec):
             "condition_groups": [[cond_json(c) for c in g]
                                  for g in spec.get("condition_groups") or []],
             "ai_extract": ai_extract,
-            "actions": actions}
+            "actions": actions,
+            "enabled_inboxes": spec.get("enabled_inboxes") or []}
 
 
 def _workspace_lines(result):

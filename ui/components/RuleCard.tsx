@@ -613,6 +613,14 @@ export default function RuleCard({
           )}
         </Row>
 
+        <Row k="ENABLED FOR">
+          {spec.enabled_inboxes && spec.enabled_inboxes.length ? (
+            <span className="text-[13px] font-medium">{spec.enabled_inboxes.join(", ")}</span>
+          ) : (
+            <Hole hint="which shared inbox(es)?" />
+          )}
+        </Row>
+
         {(turn.resolutions.filter((r) => r.value.toLowerCase() !== r.canonical.toLowerCase())
           .length > 0 ||
           turn.entity_notes.length > 0) && (

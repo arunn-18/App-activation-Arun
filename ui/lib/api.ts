@@ -104,6 +104,11 @@ export interface Spec {
   actions: Action[];
   ai_extract: { variables: AiVariable[] } | null;
   unsupported_requests: string[];
+  /** which shared inbox(es) this RULE is enabled for — a property of the
+   *  whole rule, not one action (engine/automation/validator.py). Empty
+   *  until named; required (when a workspace is loaded) before the rule can
+   *  reach "complete", the same way a Track A feature needs inboxes too. */
+  enabled_inboxes?: string[];
 }
 
 export interface Resolution {
@@ -118,14 +123,30 @@ export interface QuestionOption {
   value: string;
 }
 
+/** One input inside a "form"-kind StructuredQuestion (capability 5's "one
+ *  block" native-action field form — engine/automation/validator.py's
+ *  _native_action_form). `value` pre-fills whatever's already known;
+ *  `options` is present only when `kind === "choice"` (e.g. priority). */
+export interface FormField {
+  key: string;
+  label: string;
+  required: boolean;
+  value: string;
+  kind?: "choice";
+  options?: QuestionOption[];
+}
+
 export interface StructuredQuestion {
   slot: string;
   prompt: string;
-  kind: "choice" | "text";
+  kind: "choice" | "text" | "form";
   options: QuestionOption[];
   multiple: boolean;
   allow_other: boolean;
   other_hint: string;
+  /** set only when kind === "form" — every field to collect together in
+   *  one block, instead of one sequential question per field. */
+  fields?: FormField[];
 }
 
 /** A reading the engine chose for the user on a slot where a legal rule exists

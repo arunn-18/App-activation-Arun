@@ -72,11 +72,64 @@ def run():
     check("connected + both params provenance-verified -> complete",
           r1["status"] == "complete" and not r1["errors"])
 
-    # ---- missing required params -----------------------------------------------
+    # ---- all 6 fields (capability 5's field expansion) run through for real --
+    full_convo = (convo + " assign it to Jamie, due tomorrow, priority High, "
+                          "description: customer needs a callback")
+    full_spec = _spec(target_name="Support Escalations", title_hint="Follow up with customer",
+                      description_hint="customer needs a callback", assignee_name="Jamie",
+                      due_date_hint="tomorrow", priority_hint="High")
+    r_full = validator.validate(full_spec, full_convo, apps_ws=connected)
+    check("all 6 fields together -> still complete, no field left blocking",
+          r_full["status"] == "complete" and not r_full["errors"])
+    test_run_full = copilot.connector_test_run(full_spec)
+    check("the optional fields actually reach the mock create_task call",
+          test_run_full["status"] == "ok"
+          and test_run_full["result"]["description"] == "customer needs a callback"
+          and test_run_full["result"]["assignee"] == "Jamie"
+          and test_run_full["result"]["due_date"] == "tomorrow"
+          and test_run_full["result"]["priority"] == "High")
+    final_full = copilot.to_final_json(full_spec)
+    check("exported JSON carries all 4 optional fields too",
+          final_full["actions"][0]["description_hint"] == "customer needs a callback"
+          and final_full["actions"][0]["assignee_name"] == "Jamie"
+          and final_full["actions"][0]["due_date_hint"] == "tomorrow"
+          and final_full["actions"][0]["priority_hint"] == "High")
+    rendered_full = copilot._render_action(full_spec["actions"][0])
+    check("rendered draft shows the optional fields when present",
+          "description customer needs a callback" in rendered_full
+          and "assignee Jamie" in rendered_full and "due tomorrow" in rendered_full
+          and "priority High" in rendered_full)
+
+    # ---- optional fields stay optional: omitting all 4 still completes ------
+    minimal_spec = _spec(target_name="Support Escalations", title_hint="Follow up with customer")
+    r_minimal = validator.validate(minimal_spec, convo, apps_ws=connected)
+    check("omitting every optional field still reaches complete -- only "
+          "target_name/title_hint are load-bearing",
+          r_minimal["status"] == "complete")
+    test_run_minimal = copilot.connector_test_run(minimal_spec)
+    check("the mock response omits unset optional fields, never fakes a value",
+          test_run_minimal["status"] == "ok"
+          and "description" not in test_run_minimal["result"]
+          and "assignee" not in test_run_minimal["result"])
+
+    # ---- missing required params: ONE "one block" form, not two sequential
+    # questions (a live test asked for all the fields together)
     r2 = validator.validate(_spec(), "create a clickup task", apps_ws=connected)
-    check("no params yet -> needs_info, asks for both", r2["status"] == "needs_info"
-          and {q["slot"] for q in r2["missing"]}
-              >= {"actions[0].target_name", "actions[0].title_hint"})
+    check("no params yet -> needs_info, one bundled form question",
+          r2["status"] == "needs_info"
+          and any(m["slot"] == "actions[0].__native_action_fields" for m in r2["missing"]))
+    form_q = next(q for q in r2["questions_structured"]
+                 if q["slot"] == "actions[0].__native_action_fields")
+    check("the form bundles all 6 fields, required ones flagged, values pre-filled empty",
+          form_q["kind"] == "form" and len(form_q["fields"]) == 6
+          and {f["key"] for f in form_q["fields"] if f["required"]}
+              == {"target_name", "title_hint"}
+          and all(f["value"] == "" for f in form_q["fields"]))
+    priority_field = next(f for f in form_q["fields"] if f["key"] == "priority_hint")
+    check("priority is offered as a real choice, not free text",
+          priority_field.get("kind") == "choice"
+          and {o["value"] for o in priority_field["options"]}
+              == {"Urgent", "High", "Normal", "Low"})
 
     # ---- provenance: target_name must be in the user's own words --------------
     hallucinated_spec = _spec(target_name="Some Other List",

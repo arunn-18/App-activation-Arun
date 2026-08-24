@@ -251,7 +251,9 @@ NATIVE_ACTIONS = {
         "description": ("Creates a task in a ClickUp list from this conversation — a "
                         "native Hiver action block, not an API call this engine composes."),
         "op": "create_task",
-        "args": {"list_name": "target_name", "title": "title_hint"},
+        "args": {"list_name": "target_name", "title": "title_hint",
+                 "description": "description_hint", "assignee": "assignee_name",
+                 "due_date": "due_date_hint", "priority": "priority_hint"},
         "prerequisites": ["clickup_connected"],
     },
 }
@@ -371,7 +373,24 @@ ACTIONS = {
                                                "created in?"},
                    "title_hint": {"required": False, "provenance": False,
                                   "question": "What should the task's title be (e.g. the "
-                                              "conversation subject)?"}}},
+                                              "conversation subject)?"},
+                   # The rest of a native action's fields — ALWAYS optional
+                   # (a task genuinely doesn't need a description/assignee/
+                   # due date/priority to exist; only target_name/title_hint
+                   # are load-bearing, enforced explicitly in validator.py).
+                   # Collected together with the two above in ONE form
+                   # question (see validator.py's _native_action_form) — a
+                   # live test asked for "all the fields in one block", not
+                   # six sequential one-at-a-time questions.
+                   "description_hint": {"required": False, "provenance": False,
+                                        "question": "Description (optional)?"},
+                   "assignee_name": {"required": False, "provenance": True,
+                                     "question": "Who should it be assigned to (optional)?"},
+                   "due_date_hint": {"required": False, "provenance": True,
+                                     "question": "Due date (optional)?"},
+                   "priority_hint": {"required": False, "provenance": False,
+                                     "enum": ["Urgent", "High", "Normal", "Low"],
+                                     "question": "Priority (optional)?"}}},
 }
 
 # asks we recognize but don't build — name them, don't fake them

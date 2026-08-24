@@ -222,12 +222,18 @@ EXTRACTION RULES:
    ("create a ClickUp task from this conversation" -> clickup_create_task).
    Check this BEFORE attempting a custom_plan (rule 19b): a native action is
    Hiver's own pre-built block, simpler and more certain than composing API
-   calls, so prefer it whenever one actually matches. target_name (which
-   list/board/channel — provenance-guarded, rule 1) and title_hint (what the
-   created item should be titled/about — free text, not provenance-guarded,
-   same as add_note's content) are its own two slots; leave either null if
-   the user hasn't said it yet. recipe/native_action_id/custom_plan are all
-   mutually exclusive — never fill more than one on the same action. A
+   calls, so prefer it whenever one actually matches. Its slots: target_name
+   (which list/board/channel — provenance-guarded, rule 1) and title_hint
+   (what the created item should be titled/about — free text, not
+   provenance-guarded, same as add_note's content) are load-bearing; leave
+   either null if the user hasn't said it yet. description_hint (free text,
+   not provenance-guarded), assignee_name (who it's assigned to —
+   provenance-guarded), due_date_hint (when it's due — provenance-guarded),
+   and priority_hint (Urgent/High/Normal/Low ONLY — never invent a level the
+   user didn't name) are genuinely OPTIONAL — fill whichever the user
+   actually said, leave the rest null, never invent a default for any of
+   them. recipe/native_action_id/custom_plan are all mutually exclusive —
+   never fill more than one on the same action. A
    request for a NON-Salesforce, non-native-action integration (a generic
    "call our API" against an app with no NATIVE APP ACTIONS entry, a
    webhook) is NOT buildable at all — add "connector_other" reasoning to
@@ -268,6 +274,12 @@ EXTRACTION RULES:
    or says "connect salesforce"/"connect clickup" unprompted). Keep it true
    for the rest of the conversation once said — the same persistence rule
    apps/extract.py's own connect_requested already follows for Track A.
+20. enabled_inboxes: the shared inbox(es) the user named for this RULE (not one
+   action) to run in — legal ONLY as an EXACT shared-inbox name (use
+   list_inboxes if unsure, exactly like resolving a tag/assignee). Leave null
+   until the user actually names one; once named, keep it for the rest of the
+   conversation. Never guess a "default" or "all inboxes" — the admin always
+   states this explicitly, the same way Track A's own inbox-enable step works.
 """
 
 
@@ -341,6 +353,15 @@ RESPONSE_SCHEMA = {
                                             "enum": list(schema.NATIVE_ACTIONS) + [None]},
                         "target_name": {"type": ["string", "null"]},
                         "title_hint": {"type": ["string", "null"]},
+                        # the rest of a native action's fields (rule 19a) —
+                        # ALWAYS optional, collected alongside target_name/
+                        # title_hint in ONE form question, never six
+                        # sequential ones (see validator.py).
+                        "description_hint": {"type": ["string", "null"]},
+                        "assignee_name": {"type": ["string", "null"]},
+                        "due_date_hint": {"type": ["string", "null"]},
+                        "priority_hint": {"type": ["string", "null"],
+                                         "enum": ["Urgent", "High", "Normal", "Low", None]},
                         # A dynamically-composed connector plan (rule 19b) — the
                         # OTHER way to fill a connector action when no RECIPES
                         # entry or native action matches. extract_variables is an array of
@@ -409,7 +430,8 @@ RESPONSE_SCHEMA = {
                                  "email_enabled", "inbox", "body_hint",
                                  "recipe", "connect_requested", "test_contact_email",
                                  "native_action_id", "target_name", "title_hint",
-                                 "custom_plan"],
+                                 "description_hint", "assignee_name", "due_date_hint",
+                                 "priority_hint", "custom_plan"],
                 },
             },
             "ai_extract": {
@@ -442,10 +464,15 @@ RESPONSE_SCHEMA = {
                                          "why": {"type": "string"}},
                           "required": ["request", "why"]},
             },
+            # rule 20: which shared inbox(es) this rule runs in — a property
+            # of the WHOLE rule, not one action, so it lives at this level
+            # (Track A's own inbox-enable step is the direct precedent).
+            "enabled_inboxes": {"type": ["array", "null"], "items": {"type": "string"}},
         },
         "required": ["intent_summary", "trigger", "scope_confirmed",
                      "condition_groups", "actions", "ai_extract",
-                     "unsupported_requests", "closing", "unmappable"],
+                     "unsupported_requests", "closing", "unmappable",
+                     "enabled_inboxes"],
     },
 }
 

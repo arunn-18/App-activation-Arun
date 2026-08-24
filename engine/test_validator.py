@@ -222,6 +222,7 @@ def run():
     res = validator.validate(
         {"trigger": "new_conversation_inbound", "scope_confirmed": True,
          "condition_groups": [], "actions": [{"type": "add_tag", "tags": ["Urgent"]}],
+         "enabled_inboxes": ["Support"],
          "unmappable": [{"request": "an existing tag VIP",
                          "why": "no condition property for tags"}]},
         "tag urgent when it already has tag VIP", ws_fix)
@@ -349,7 +350,8 @@ def run():
           and any("more than one" in q for q in res["questions"]))
 
     spec_s = {"trigger": "new_conversation_inbound", "scope_confirmed": True,
-              "condition_groups": [], "actions": [{"type": "assign", "target": "sarah"}]}
+              "condition_groups": [], "actions": [{"type": "assign", "target": "sarah"}],
+              "enabled_inboxes": ["Support"]}
     res = validator.validate(spec_s, "assign every new email to sarah", ws=ws)
     check("unique fuzzy resolves without asking", res["status"] == "complete"
           and res["resolutions"]
@@ -359,7 +361,8 @@ def run():
 
     res = validator.validate(
         {"trigger": "new_conversation_inbound", "scope_confirmed": True,
-         "condition_groups": [], "actions": [{"type": "assign", "target": "Sarah Lee"}]},
+         "condition_groups": [], "actions": [{"type": "assign", "target": "Sarah Lee"}],
+         "enabled_inboxes": ["Support"]},
         "assign every new email to sarah", ws=ws)
     check("model's tool resolution re-verified from user's words",
           res["status"] == "complete" and not res["hallucinated"])
@@ -373,7 +376,8 @@ def run():
 
     res = validator.validate(
         {"trigger": "new_conversation_inbound", "scope_confirmed": True,
-         "condition_groups": [], "actions": [{"type": "add_tag", "tags": ["gold-partner"]}]},
+         "condition_groups": [], "actions": [{"type": "add_tag", "tags": ["gold-partner"]}],
+         "enabled_inboxes": ["Support"]},
         "tag all new emails gold-partner", ws=ws)
     check("unknown tag builds with create-first note", res["status"] == "complete"
           and res["entity_notes"])
@@ -384,6 +388,30 @@ def run():
     spec_t = validator.apply_resolutions(spec_t, res)
     check("tag casing canonicalized to workspace form",
           spec_t["actions"][0]["tags"] == ["VIP"])
+
+    # ---- enabled_inboxes: EVERY automation needs this once a workspace is
+    # loaded — a rule doesn't run workspace-wide any more than a Track A
+    # feature does (that step's own precedent). Skipped entirely with no
+    # workspace (the 56/56 core eval records above never set this and still
+    # reach "complete", proving the ws=None skip already holds).
+    otherwise_complete = {"trigger": "new_conversation_inbound", "scope_confirmed": True,
+                          "condition_groups": [], "actions": [{"type": "add_tag", "tags": ["VIP"]}]}
+    res = validator.validate(otherwise_complete, "tag urgent emails VIP", ws=ws)
+    check("missing enabled_inboxes blocks completion once a workspace is loaded",
+          res["status"] == "needs_info")
+    inbox_q = next(q for q in res["questions_structured"] if q["slot"] == "enabled_inboxes")
+    check("the inbox question is an actual multi-select of REAL workspace inboxes",
+          inbox_q["kind"] == "choice" and inbox_q["multiple"] is True
+          and {o["value"] for o in inbox_q["options"]} == {"Support", "Billing", "Events"})
+
+    with_inboxes = {**otherwise_complete, "enabled_inboxes": ["Support", "Billing"]}
+    res = validator.validate(with_inboxes, "tag urgent emails VIP", ws=ws)
+    check("naming inbox(es) clears the gate -- otherwise-complete rule finishes",
+          res["status"] == "complete")
+
+    res = validator.validate(otherwise_complete, "tag urgent emails VIP", ws=None)
+    check("no workspace context -> enabled_inboxes not required at all",
+          res["status"] == "complete")
 
     # ---- coherence: contradictions and conflicting actions
     res = validator.validate(
@@ -439,7 +467,8 @@ def run():
     res = validator.validate(
         {"trigger": "new_conversation_inbound", "scope_confirmed": True,
          "condition_groups": [],
-         "actions": [{"type": "add_tag", "tags": ["gold-partner"]}]},
+         "actions": [{"type": "add_tag", "tags": ["gold-partner"]}],
+         "enabled_inboxes": ["Support"]},
         "tag all new emails gold-partner", ws=ws)
     check("unknown tag with no near-miss keeps create-first note",
           res["status"] == "complete" and res["entity_notes"])
