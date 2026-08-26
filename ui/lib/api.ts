@@ -610,6 +610,21 @@ export function hasRuleCard(t: TurnState): boolean {
   if (t.track === "feature") return false;
   const builtNothing = t.spec.actions.length === 0;
   if (t.capability_answer && builtNothing) return false;
+  // The ClickUp "create a task" native action must not surface a card
+  // filled in with a silent "runs on everything" guess -- the admin has to
+  // say WHEN to create the task and WHAT to look for FIRST (engine/
+  // automation/validator.py's clickup_create_task-only scope override, plus
+  // extract.py's rule 22 leaving trigger null for it). A spec that is JUST
+  // this one still-unconfirmed action holds the card back; any OTHER action
+  // in the same spec (or this one once trigger+scope are both given) shows
+  // as normal.
+  const clickupActions = t.spec.actions.filter(
+    (a) => a.native_action_id === "clickup_create_task");
+  const onlyUnconfirmedClickupTask = clickupActions.length > 0
+    && clickupActions.length === t.spec.actions.length
+    && (!t.spec.trigger
+        || (!t.spec.scope_confirmed && t.spec.condition_groups.length === 0));
+  if (onlyUnconfirmedClickupTask) return false;
   return !t.no_intent || Boolean(t.spec.trigger) || t.spec.actions.length > 0;
 }
 

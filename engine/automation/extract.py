@@ -294,6 +294,17 @@ EXTRACTION RULES:
    until the user actually answers either way; once answered (true OR
    false), keep that answer for the rest of the conversation — don't keep
    re-asking after a "no".
+22. The ClickUp "create a task" native action (native_action_id =
+   clickup_create_task) OVERRIDES rule 4's trigger default: leave `trigger`
+   null for it until the user has actually said WHEN the task should be
+   created ("when a new conversation arrives", "when a customer replies",
+   "every incoming email"...) — do NOT default it to
+   new_conversation_inbound just because the request mentions "this
+   conversation" or ClickUp/tasks in general. This ONLY applies when
+   clickup_create_task is the action; any other action in the same turn
+   still gets rule 4's normal default. The admin should be asked WHEN
+   before ever seeing this automation drafted, not have it assumed for
+   them.
 """
 
 

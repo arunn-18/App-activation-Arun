@@ -557,13 +557,33 @@ def validate(spec, conversation_text, ws=None, user_messages=None, apps_ws=None)
     # rule exists ("which tag?"). The assumption is surfaced on the draft and
     # confirmed at apply time; answering in chat ("only emails from acme.com" /
     # "run it on everything") converts it to specified either way.
+    #
+    # EXCEPT the ClickUp "create a task" native action: a live product review
+    # (2026-08-26) called this out specifically — the automation card must
+    # not appear filled in with a silent "runs on everything" assumption; the
+    # admin has to be asked what to look for FIRST. So for clickup_create_task
+    # this becomes a blocking question (same "scope" slot/rank as the
+    # assumption's, so it bundles with the trigger question above into one
+    # turn) instead of a silently-applied assumption. Any other action keeps
+    # the assumption behavior above.
+    is_clickup_create_task = any(
+        a.get("type") == "connector" and a.get("native_action_id") == "clickup_create_task"
+        for a in (spec.get("actions") or []))
     if trigger and not groups and not spec.get("scope_confirmed") and not scope_pinned:
-        assumptions.append({
-            "slot": "scope",
-            "assumed": "everything",
-            "summary": "runs on every matching conversation",
-            "question": SCOPE_QUESTION,
-        })
+        if is_clickup_create_task:
+            missing.append({
+                "slot": "scope",
+                "question": ("What should I look for to create the task — a sender, "
+                             "subject keyword, tag, or status? Say \"every conversation\" "
+                             "if you want it on all of them."),
+            })
+        else:
+            assumptions.append({
+                "slot": "scope",
+                "assumed": "everything",
+                "summary": "runs on every matching conversation",
+                "question": SCOPE_QUESTION,
+            })
 
     # ---- actions
     actions = spec.get("actions") or []

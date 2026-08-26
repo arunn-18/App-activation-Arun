@@ -176,6 +176,52 @@ def run():
           and any(o["label"] == "Create tasks automatically via automation"
                   for o in r6["questions_structured"][0]["options"]))
 
+    # ---- ask trigger+scope BEFORE showing the card (2026-08-26 review) --------
+    # A live product review called out clickup_create_task specifically: the
+    # automation card must not appear pre-filled with a silent "runs on
+    # everything" guess -- the admin has to be asked WHEN and WHAT TO LOOK
+    # FOR first. validator.py's scope override + hasRuleCard()'s UI-side
+    # suppression (ui/lib/api.ts) both key off this.
+    no_scope_spec = _spec(target_name="Support Escalations",
+                          title_hint="Follow up with customer",
+                          )
+    no_scope_spec["scope_confirmed"] = False
+    r_scope = validator.validate(no_scope_spec, convo, apps_ws=connected)
+    check("clickup_create_task with no conditions and scope unconfirmed -> "
+          "BLOCKING question, not a silent assumption",
+          r_scope["status"] == "needs_info"
+          and any(m["slot"] == "scope" for m in r_scope["missing"])
+          and not any(a["slot"] == "scope" for a in r_scope["assumptions"]))
+    check("the blocking scope question asks what to look for, offers an "
+          "'every conversation' escape hatch",
+          any("look for" in m["question"] and "every conversation" in m["question"]
+              for m in r_scope["missing"] if m["slot"] == "scope"))
+
+    # the SAME shape for a non-ClickUp action keeps the old assumption
+    # behavior -- this override is scoped to clickup_create_task only.
+    recipe_spec = {"trigger": "new_conversation_inbound", "scope_confirmed": False,
+                  "condition_groups": [],
+                  "actions": [{"type": "connector", "recipe": "salesforce_account_csm_autoassign",
+                               "native_action_id": None, "custom_plan": None,
+                               "test_contact_email": None}],
+                  "ai_extract": None, "unsupported_requests": [], "closing": False,
+                  "unmappable": []}
+    r_recipe = validator.validate(recipe_spec, "assign new conversations to the account CSM")
+    check("a non-ClickUp connector action still gets the old ASSUMPTION "
+          "behavior, not a blocking question",
+          any(a["slot"] == "scope" for a in r_recipe["assumptions"])
+          and not any(m["slot"] == "scope" for m in r_recipe["missing"]))
+
+    # once the admin actually answers (a condition, or 'every conversation'),
+    # the block clears and the rule reaches complete like any other.
+    answered_spec = {**no_scope_spec, "condition_groups": [[
+        {"property": "from_domain", "op": "contains", "values": ["acme.com"],
+         "variable": None}]]}
+    r_answered = validator.validate(answered_spec, convo + " from acme.com", apps_ws=connected)
+    check("a real condition clears the block -- reaches complete like normal",
+          r_answered["status"] == "complete"
+          and not any(m["slot"] == "scope" for m in r_answered["missing"]))
+
     # ---- rendering: draft text, exported JSON, real test-run ------------------
     draft = copilot.render_structure(spec)
     check("draft shows the native action by name and its two params, not a "
