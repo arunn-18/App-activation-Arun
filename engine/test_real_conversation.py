@@ -62,6 +62,31 @@ def run():
     check("find_conversation returns None for an id that doesn't exist",
           mailbox_lookup.find_conversation("not-a-real-id") is None)
 
+    # ---- mailbox picker (2026-08-26): scope by inbox, and an app-aware ------
+    # contact-match requirement -- ClickUp's write feature has no contact
+    # concept at all, so it must not filter by Salesforce contacts.
+    billing_convos = mailbox_lookup.testable_conversations(inboxes=["Billing"])
+    check("inboxes= scopes to just that inbox's conversations",
+          len(billing_convos) > 0 and all(c["inbox"] == "Billing" for c in billing_convos))
+    check("a conversation from a DIFFERENT inbox never leaks in",
+          all(c["inbox"] != "Support" for c in billing_convos))
+
+    unfiltered_no_contacts = mailbox_lookup.testable_conversations(
+        require_contact_match=False, limit=1000)
+    check("require_contact_match=False offers EVERY conversation in scope, "
+          "not just ones matching a Salesforce contact",
+          len(unfiltered_no_contacts) > len(convos))
+
+    scoped_no_contacts = mailbox_lookup.testable_conversations(
+        inboxes=["Billing"], require_contact_match=False, limit=1000)
+    check("inboxes + require_contact_match=False compose -- ClickUp's actual "
+          "shape (scoped to the feature's enabled inbox, no contact filter)",
+          len(scoped_no_contacts) > len(billing_convos)
+          and all(c["inbox"] == "Billing" for c in scoped_no_contacts))
+
+    check("an inbox with no conversations at all returns an honest empty list",
+          mailbox_lookup.testable_conversations(inboxes=["Nonexistent Inbox"]) == [])
+
     # ---- Track A: preview_feature() against real data -----------------------
     complete_feature = {
         "id": FEATURE_ID, "app": "salesforce", "name": "View account & contact details",

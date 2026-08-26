@@ -55,6 +55,7 @@ this doesn't already prevent.
 import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 import connected_apps
 import copilot
@@ -98,9 +99,14 @@ class Handler(BaseHTTPRequestHandler):
         self._send(204, {})
 
     def do_GET(self):
-        if self.path == "/api/apps":
+        # split off the query string ONCE — only the testable-conversations
+        # route below reads one (capability 7's mailbox picker, 2026-08-26);
+        # every other route keeps matching on the bare path exactly as
+        # before, since none of them ever carried a query string.
+        path, _, query = self.path.partition("?")
+        if path == "/api/apps":
             return self._send(200, {"apps": list(APPS_WS.get("connected_apps", {}))})
-        m = APP_PATH.match(self.path)
+        m = APP_PATH.match(path)
         if m:
             app = m.group(1)
             # copy each entry rather than mutate schema.FEATURES/RECIPES in
@@ -127,15 +133,22 @@ class Handler(BaseHTTPRequestHandler):
                 "track_b_recipes": recipes,
                 "native_actions": natives,
             })
-        m = TESTABLE_CONVERSATIONS_PATH.match(self.path)
+        m = TESTABLE_CONVERSATIONS_PATH.match(path)
         if m:
             # capability 7's conversation picker — shown BEFORE the
             # write-test-create form (or a view feature's preview), never
-            # skipped straight past. Salesforce-only today, same as
-            # mailbox_lookup.testable_conversations()'s own default fixture;
-            # an app with no contacts-shaped fixture has nothing to offer
-            # here yet.
-            return self._send(200, {"conversations": mailbox_lookup.testable_conversations()})
+            # skipped straight past. `?inbox=` (optional, 2026-08-26): the
+            # mailbox picker step ahead of this one scopes the list to ONE
+            # of the feature's own enabled inbox(es) — see FeatureCard.tsx's
+            # WriteTestForm. Contact-matching (require_contact_match) is
+            # Salesforce-only: ClickUp's write feature has no contact
+            # concept, so every conversation in scope is testable there —
+            # see mailbox_lookup.testable_conversations()'s own docstring.
+            app = m.group(1)
+            inbox = parse_qs(query).get("inbox", [None])[0]
+            return self._send(200, {"conversations": mailbox_lookup.testable_conversations(
+                inboxes=[inbox] if inbox else None,
+                require_contact_match=(app == "salesforce"))})
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):

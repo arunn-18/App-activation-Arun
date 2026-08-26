@@ -272,8 +272,8 @@ export default function AppsPanel() {
                           fieldValues
                         )
                       }
-                      fetchTestConversations={() =>
-                        fetchTestableConversationsApp(selectedApp)
+                      fetchTestConversations={(inbox) =>
+                        fetchTestableConversationsApp(selectedApp, inbox)
                       }
                     />
                   )}

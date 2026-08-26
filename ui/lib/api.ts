@@ -500,6 +500,9 @@ export interface TestableConversation {
   from: string;
   subject: string;
   received_at: string;
+  /** which shared inbox this conversation is in — present once the
+   *  mailbox-picker step (2026-08-26) can scope by it. */
+  inbox?: string;
 }
 
 export async function fetchTestableConversationsAutomation(): Promise<TestableConversation[]> {
@@ -509,9 +512,18 @@ export async function fetchTestableConversationsAutomation(): Promise<TestableCo
   return data.conversations ?? [];
 }
 
-export async function fetchTestableConversationsApp(app: string): Promise<TestableConversation[]> {
+/** `inbox` (optional, 2026-08-26): scope to ONE shared inbox — the
+ *  write-test flow's mailbox-picker step passes the inbox the admin just
+ *  picked, restricted to the feature's own enabled inbox(es)
+ *  (FeatureCard.tsx never offers one outside that set). Omitted for the
+ *  view-feature preview flow, which has no mailbox-picker step. */
+export async function fetchTestableConversationsApp(
+  app: string,
+  inbox?: string
+): Promise<TestableConversation[]> {
+  const qs = inbox ? `?inbox=${encodeURIComponent(inbox)}` : "";
   const res = await fetch(
-    `${APPS_API_BASE}/api/apps/${encodeURIComponent(app)}/testable-conversations`
+    `${APPS_API_BASE}/api/apps/${encodeURIComponent(app)}/testable-conversations${qs}`
   );
   if (!res.ok) throw new Error(`apps/${app}/testable-conversations: HTTP ${res.status}`);
   const data = await res.json();

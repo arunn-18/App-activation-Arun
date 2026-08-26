@@ -44,8 +44,10 @@ export default function FeatureCard({
   onTestCreate?: (fieldValues: Record<string, string>) => Promise<TestCreateResult>;
   /** capability 7's conversation picker — real mailbox conversations to
    *  choose from BEFORE the create-form appears (never skipped past
-   *  straight into the form; a live test asked for exactly this order). */
-  fetchTestConversations?: () => Promise<TestableConversation[]>;
+   *  straight into the form; a live test asked for exactly this order).
+   *  `inbox` (2026-08-26): the mailbox-picker step ahead of it passes
+   *  whichever of the feature's OWN enabled inboxes the admin picked. */
+  fetchTestConversations?: (inbox?: string) => Promise<TestableConversation[]>;
 }) {
   const feat = featureRequest.feature;
   const progress = featureRequest.progress ?? {};
@@ -144,6 +146,7 @@ export default function FeatureCard({
         <WriteTestForm
           fieldsByObject={fieldsByObject}
           prefillFields={prefillFields}
+          inboxes={inboxes}
           onTestCreate={onTestCreate}
           fetchTestConversations={fetchTestConversations}
         />
@@ -217,16 +220,21 @@ function FeaturePreviewStrip({
  *  submitting values and creating a real (mock) record — the write
  *  analogue, not a variant of the same strip.
  *
- *  TWO STEPS, in order — a live test explicitly asked for the conversation
- *  picker to come FIRST, matching the real Hiver Salesforce panel (open a
- *  conversation, THEN its create-object form appears), not a bare form with
- *  no conversation context at all:
- *    1. pick a real conversation (mailbox_lookup.testable_conversations,
- *       the SAME real-conversation set a view feature's preview offers)
- *    2. only then does the field-value form for THAT conversation appear */
+ *  THREE STEPS, in order (mailbox added 2026-08-26 — a live product review
+ *  asked for it explicitly, ahead of the conversation picker a live test
+ *  had already asked for):
+ *    1. pick which of the feature's own ENABLED shared inbox(es) to test in
+ *       — never every inbox in the workspace, only the ones this feature
+ *       was actually turned on for (feature.inboxes). Skipped when there's
+ *       only one — nothing to pick between.
+ *    2. pick a real conversation FROM that inbox
+ *       (mailbox_lookup.testable_conversations, scoped server-side)
+ *    3. only then does the field-value form for THAT conversation appear,
+ *       pre-filled from the feature's own Prefill Fields (step 5) */
 function WriteTestForm({
   fieldsByObject,
   prefillFields,
+  inboxes,
   onTestCreate,
   fetchTestConversations,
 }: {
@@ -236,11 +244,20 @@ function WriteTestForm({
    *  configured defaults; still freely editable before creating, same as
    *  any other value here. */
   prefillFields?: Record<string, string>;
+  /** the shared inbox(es) this feature is ENABLED for — the mailbox
+   *  picker's own option list, never the whole workspace's inboxes. */
+  inboxes: string[];
   onTestCreate: (fieldValues: Record<string, string>) => Promise<TestCreateResult>;
-  fetchTestConversations?: () => Promise<TestableConversation[]>;
+  fetchTestConversations?: (inbox?: string) => Promise<TestableConversation[]>;
 }) {
   const object = Object.keys(fieldsByObject)[0];
   const labels = fieldsByObject[object] ?? [];
+  // only one inbox -> nothing to pick between, so start there directly and
+  // skip straight to the conversation-picker step.
+  const [selectedInbox, setSelectedInbox] = useState<string | null>(
+    inboxes.length === 1 ? inboxes[0] : null
+  );
+  const needsInboxPick = inboxes.length > 1 && !selectedInbox;
   const [conversations, setConversations] = useState<TestableConversation[] | null>(null);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TestableConversation | null>(null);
@@ -250,11 +267,13 @@ function WriteTestForm({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!fetchTestConversations) return;
-    fetchTestConversations()
+    if (!fetchTestConversations || needsInboxPick) return;
+    setConversations(null);
+    setConversationsError(null);
+    fetchTestConversations(selectedInbox ?? undefined)
       .then(setConversations)
       .catch((e) => setConversationsError(e instanceof Error ? e.message : String(e)));
-  }, [fetchTestConversations]);
+  }, [fetchTestConversations, selectedInbox, needsInboxPick]);
 
   if (!object || labels.length === 0) return null;
 
@@ -271,7 +290,29 @@ function WriteTestForm({
     }
   };
 
-  // step 1: no picker wired up at all (a page that hasn't fetched it) — fall
+  // step 1: which shared inbox to test in — skipped when there's only one.
+  if (fetchTestConversations && needsInboxPick) {
+    return (
+      <div className="space-y-2 border-t border-hairline px-4 py-3">
+        <p className="text-[12.5px] font-medium text-ink">
+          Test it — pick a shared inbox to test in:
+        </p>
+        <div className="space-y-1.5">
+          {inboxes.map((name) => (
+            <button
+              key={name}
+              onClick={() => setSelectedInbox(name)}
+              className="block w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-left text-[12.5px] transition-colors hover:border-ink-soft"
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // step 2: no picker wired up at all (a page that hasn't fetched it) — fall
   // back to the form directly, same graceful "don't offer what isn't there"
   // stance as the rest of this component. Otherwise a conversation MUST be
   // picked before the form shows.
@@ -279,8 +320,18 @@ function WriteTestForm({
     return (
       <div className="space-y-2 border-t border-hairline px-4 py-3">
         <p className="text-[12.5px] font-medium text-ink">
-          Test it — pick a real conversation to open the create-{object} form in:
+          Test it — pick a real conversation
+          {selectedInbox ? <> from <span className="font-mono text-[12px]">{selectedInbox}</span></> : ""}
+          {" "}to open the create-{object} form in:
         </p>
+        {inboxes.length > 1 && (
+          <button
+            onClick={() => setSelectedInbox(null)}
+            className="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
+          >
+            Pick a different inbox
+          </button>
+        )}
         {conversationsError && (
           <p className="text-[12px] text-destructive">{conversationsError}</p>
         )}
@@ -308,7 +359,7 @@ function WriteTestForm({
     );
   }
 
-  // step 2: the form, now scoped to the picked conversation.
+  // step 3: the form, now scoped to the picked conversation.
   return (
     <div className="space-y-2.5 border-t border-hairline px-4 py-3">
       <p className="text-[12.5px] font-medium text-ink">
