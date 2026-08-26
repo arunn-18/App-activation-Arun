@@ -87,6 +87,20 @@ def run():
         router.classify = original_router_classify
         apps_extract.extract = original_apps_extract
 
+    # ---- Track A: the app name is read from the matched feature, not -------
+    # ---- hardcoded — a real bug found live: every feature match said -------
+    # ---- "an existing Salesforce app capability" even for ClickUp ----------
+    clickup_explanation = copilot._mapping_explanation(
+        {}, {"feature_id": "clickup_create_task_from_hiver"})
+    check("Track A: a ClickUp feature match names ClickUp, not Salesforce",
+          clickup_explanation is not None
+          and "ClickUp" in clickup_explanation
+          and "Salesforce" not in clickup_explanation)
+    salesforce_explanation = copilot._mapping_explanation(
+        {}, {"feature_id": FEATURE_ID})
+    check("Track A: a Salesforce feature match still names Salesforce",
+          salesforce_explanation is not None and "Salesforce" in salesforce_explanation)
+
     # ---- Track B: recipe, native action, and custom_plan each get named ----
     original_automation_extract = automation_extract.extract
 
@@ -123,10 +137,10 @@ def run():
         msgs = [{"role": "user", "content": "create a clickup task for this conversation"}]
         s = copilot.respond_structured(None, msgs)
         check("Track B native action: names the matched native action, flags it as "
-              "native (not composed)",
+              "built-in (not composed)",
               s["mapping_explanation"] is not None
               and "Create tasks automatically via automation" in s["mapping_explanation"]
-              and "not an API call this engine composes" in s["mapping_explanation"])
+              and "built-in ClickUp action" in s["mapping_explanation"])
     finally:
         automation_extract.extract = original_automation_extract
 

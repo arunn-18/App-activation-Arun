@@ -606,17 +606,19 @@ def _mapping_explanation(spec, feature_result):
         f = apps_schema.FEATURES.get(feature_result.get("feature_id"))
         if f is None:
             return None
-        return (f"This looks like a fit for **{f['name']}** (an existing Salesforce "
-                f"app capability) — {f['description']} Let's get it set up.")
+        app_name = docent._APP_DISPLAY_NAMES.get(f["app"], f["app"].title())
+        return (f"This looks like a fit for **{f['name']}** (an existing {app_name} "
+                f"capability) — {f['description']} Let's get it set up.")
     for a in spec.get("actions") or []:
         if a.get("type") != "connector":
             continue
         if a.get("native_action_id"):
             n = automation_schema.NATIVE_ACTIONS.get(a["native_action_id"])
             if n:
-                return (f"This looks like a fit for **{n['name']}** (a native "
-                        f"{n['app'].title()} action, not an API call this engine "
-                        f"composes) — {n['description']} Let's get it set up.")
+                app_name = docent._APP_DISPLAY_NAMES.get(n["app"], n["app"].title())
+                return (f"This looks like a fit for **{n['name']}** — a built-in "
+                        f"{app_name} action Hiver already supports — {n['description']} "
+                        f"Let's get it set up.")
         if a.get("recipe"):
             r = automation_schema.RECIPES.get(a["recipe"])
             if r:
