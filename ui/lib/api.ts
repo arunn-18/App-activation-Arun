@@ -222,6 +222,12 @@ export interface FeatureRequest {
     /** "view" (default) shows existing data; "write" creates a NEW record —
      *  decides preview vs. the write-test-create form below. */
     kind?: "view" | "write";
+    /** Steps 5/6 (2026-08-26) — ClickUp's write feature only; {} / false
+     *  for every other feature (engine/apps/setup.py's own gate). Default
+     *  values the write-test form below pre-fills, and whether Quick
+     *  Access is on (recorded only — no live badge anywhere). */
+    prefill_fields?: Record<string, string>;
+    quick_access_enabled?: boolean;
   };
   /** what's been resolved so far, for a running summary — same spirit as
    *  RuleCard showing partial WHEN/IF/THEN while slots are still open. */
@@ -230,6 +236,9 @@ export interface FeatureRequest {
     objects?: string[];
     fields_by_object?: Record<string, string[]>;
     inboxes?: string[];
+    prefill_requested?: boolean | null;
+    prefill_fields?: Record<string, string>;
+    quick_access_enabled?: boolean | null;
   };
   /** "test on a real conversation" (v2.13, capability 7) — set only once
    *  the admin names a real contact/conversation to preview against

@@ -54,6 +54,12 @@ export default function FeatureCard({
   const fieldsByObject = feat?.fields_by_object ?? progress.fields_by_object ?? {};
   const objects = feat?.objects ?? progress.objects ?? [];
   const inboxes = feat?.inboxes ?? progress.inboxes ?? [];
+  // Steps 5/6 (2026-08-26) — ClickUp's write feature only; empty/null for
+  // every other feature, so these sections simply don't render for them.
+  const prefillFields = feat?.prefill_fields ?? progress.prefill_fields ?? {};
+  const quickAccessEnabled = feat
+    ? feat.quick_access_enabled ?? false
+    : progress.quick_access_enabled;
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline bg-card">
@@ -109,6 +115,24 @@ export default function FeatureCard({
               {inboxes.join(", ")}
             </p>
           )}
+          {Object.keys(prefillFields).length > 0 && (
+            <p className="text-ink-soft">
+              <span className="font-mono text-[11px] font-semibold text-muted-foreground">
+                PREFILL DEFAULTS
+              </span>{" "}
+              {Object.entries(prefillFields)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(", ")}
+            </p>
+          )}
+          {quickAccessEnabled != null && (
+            <p className="text-ink-soft">
+              <span className="font-mono text-[11px] font-semibold text-muted-foreground">
+                QUICK ACCESS
+              </span>{" "}
+              {quickAccessEnabled ? "on" : "off"}
+            </p>
+          )}
         </div>
       )}
 
@@ -119,6 +143,7 @@ export default function FeatureCard({
       {featureRequest.status === "complete" && feat?.kind === "write" && onTestCreate && (
         <WriteTestForm
           fieldsByObject={fieldsByObject}
+          prefillFields={prefillFields}
           onTestCreate={onTestCreate}
           fetchTestConversations={fetchTestConversations}
         />
@@ -201,10 +226,16 @@ function FeaturePreviewStrip({
  *    2. only then does the field-value form for THAT conversation appear */
 function WriteTestForm({
   fieldsByObject,
+  prefillFields,
   onTestCreate,
   fetchTestConversations,
 }: {
   fieldsByObject: Record<string, string[]>;
+  /** Step 5's default values (ClickUp's write feature only, {} for every
+   *  other feature) — pre-fills the form so agents start from the
+   *  configured defaults; still freely editable before creating, same as
+   *  any other value here. */
+  prefillFields?: Record<string, string>;
   onTestCreate: (fieldValues: Record<string, string>) => Promise<TestCreateResult>;
   fetchTestConversations?: () => Promise<TestableConversation[]>;
 }) {
@@ -213,7 +244,7 @@ function WriteTestForm({
   const [conversations, setConversations] = useState<TestableConversation[] | null>(null);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TestableConversation | null>(null);
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, string>>(prefillFields ?? {});
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TestCreateResult | null>(null);
   const [error, setError] = useState<string | null>(null);

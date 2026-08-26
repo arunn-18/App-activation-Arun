@@ -299,14 +299,15 @@ def _contributed(spec, last_text):
 
 def _contributed_app_setup(spec, last_text):
     """The apps/ (Track A) analogue of _contributed(): did the given message
-    name a record, field, or inbox that's now in the accumulated setup?
-    connect_requested isn't checked here, same as _contributed() never
-    checks booleans like `pinned` — there's no literal value to match
-    against the message text."""
+    name a record, field, inbox, or prefill value that's now in the
+    accumulated setup? connect_requested/quick_access_enabled aren't
+    checked here, same as _contributed() never checks booleans like
+    `pinned` — there's no literal value to match against the message text."""
     norm = " ".join(str(last_text).split()).lower()
     vals = []
     for k in ("objects", "account_fields", "contact_fields", "inboxes"):
         vals += spec.get(k) or []
+    vals += [p.get("value") for p in (spec.get("prefill_fields") or [])]
     return any(str(v).strip() and " ".join(str(v).split()).lower() in norm
                for v in vals)
 

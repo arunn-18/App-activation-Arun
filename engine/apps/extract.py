@@ -103,6 +103,23 @@ EXTRACTION RULES:
    any way. Leave null until the user actually answers either way; once answered
    (true OR false), keep that answer for the rest of the conversation — don't keep
    re-asking after a "no".
+10. prefill_requested / prefill_fields (clickup_create_task_from_hiver only, once
+   the feature is otherwise fully set up): true the moment the user names an
+   actual field + default value to prefill ("default the Priority to High"), or
+   says an unambiguous yes ("sure, set some defaults"); false the moment they
+   decline ("skip", "no thanks", "not now"). prefill_fields: {{field, value}}
+   pairs the user actually named — legal `field` values ONLY from the ones
+   already chosen for this feature's own write form (task_fields), never
+   invented, never a field this feature isn't exposing. Optional courtesy, never
+   part of the feature itself — leave prefill_requested null until answered
+   either way, then keep that answer for the rest of the conversation.
+11. quick_access_enabled (clickup_create_task_from_hiver only, same "otherwise
+   fully set up" timing as rule 10): true the moment the user agrees to enable
+   Quick Access (a task badge on the conversation for easy access back to a
+   created task) — "yes", "enable it", "turn it on"; false the moment they
+   decline ("skip", "no", "not now"). Optional courtesy, never part of the
+   feature itself. Leave null until answered either way, then keep that answer
+   for the rest of the conversation.
 """
 
 RESPONSE_SCHEMA = {
@@ -144,11 +161,26 @@ RESPONSE_SCHEMA = {
             # request?" offer (Apps Activation PRD, 2026-08-24) — same
             # slot/meaning as automation/extract.py's own field.
             "feature_request_requested": {"type": ["boolean", "null"]},
+            # rules 10/11 (2026-08-26): steps 5/6, ClickUp's write feature
+            # only — see apps/setup.py's own step list. prefill_fields is an
+            # array of {field, value} pairs, not a dynamic map, for the same
+            # strict-JSON-schema reason automation/schema.py's custom_plan
+            # extract_variables is (see that field's own comment).
+            "prefill_requested": {"type": ["boolean", "null"]},
+            "prefill_fields": {
+                "type": "array",
+                "items": {"type": "object", "additionalProperties": False,
+                          "properties": {"field": {"type": "string"},
+                                         "value": {"type": "string"}},
+                          "required": ["field", "value"]},
+            },
+            "quick_access_enabled": {"type": ["boolean", "null"]},
         },
         "required": ["intent_summary", "feature", "connect_requested", "objects",
                      "account_fields", "contact_fields", "task_fields", "inboxes",
                      "test_contact_email", "closing", "unmappable",
-                     "feature_request_requested"],
+                     "feature_request_requested", "prefill_requested",
+                     "prefill_fields", "quick_access_enabled"],
     },
 }
 

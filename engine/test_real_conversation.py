@@ -140,13 +140,59 @@ def run():
 
     # ---- capability 4 generalizes past Salesforce: the SAME write flow, -----
     # driving a genuinely different app (ClickUp), config-only (task #10) --
+    # ClickUp's write feature ALSO gets steps 5/6 (Prefill Fields, Quick
+    # Access, 2026-08-26) that Salesforce's doesn't -- both optional, but
+    # still asked once before "complete", so this no longer completes in
+    # one call the way Salesforce's write feature does; see below.
     clickup_connected = _connected_ws("clickup")
-    clickup_fs = {"connect_requested": None, "objects": ["Task"],
-                 "task_fields": ["Title", "List"], "inboxes": ["Support"],
-                 "test_contact_email": None}
+    clickup_fs_base = {"connect_requested": None, "objects": ["Task"],
+                       "task_fields": ["Title", "List"], "inboxes": ["Support"],
+                       "test_contact_email": None}
+    r7a = features.resolve_setup("clickup_create_task_from_hiver", clickup_fs_base,
+                                 clickup_connected)
+    check("ClickUp write feature: steps 1-4 done -> asks Prefill Fields next, "
+          "not complete yet",
+          r7a["status"] == "needs_info"
+          and r7a["questions_structured"][0]["slot"] == "feature_setup.prefill_fields"
+          and r7a["questions_structured"][0]["kind"] == "form")
+
+    clickup_fs_prefill = {**clickup_fs_base, "prefill_requested": True,
+                          "prefill_fields": [{"field": "List", "value": "Support Escalations"}]}
+    r7b = features.resolve_setup("clickup_create_task_from_hiver", clickup_fs_prefill,
+                                 clickup_connected)
+    check("prefill values given -> moves on to the Quick Access question next",
+          r7b["status"] == "needs_info"
+          and r7b["questions_structured"][0]["slot"] == "feature_setup.quick_access_enabled")
+
+    clickup_fs_skip_prefill = {**clickup_fs_base, "prefill_requested": False}
+    r7c = features.resolve_setup("clickup_create_task_from_hiver", clickup_fs_skip_prefill,
+                                 clickup_connected)
+    check("declining prefill ('skip') still moves on to Quick Access, not stuck",
+          r7c["status"] == "needs_info"
+          and r7c["questions_structured"][0]["slot"] == "feature_setup.quick_access_enabled")
+
+    clickup_fs = {**clickup_fs_prefill, "quick_access_enabled": True}
     r7 = features.resolve_setup("clickup_create_task_from_hiver", clickup_fs, clickup_connected)
-    check("ClickUp write feature completes the same way Salesforce's does",
-          r7["status"] == "complete" and r7["preview"] is None)
+    check("both optional steps answered -> completes, carrying prefill_fields "
+          "and quick_access_enabled onto the feature",
+          r7["status"] == "complete" and r7["preview"] is None
+          and r7["feature"]["prefill_fields"] == {"List": "Support Escalations"}
+          and r7["feature"]["quick_access_enabled"] is True)
+
+    clickup_fs_all_skipped = {**clickup_fs_base, "prefill_requested": False,
+                             "quick_access_enabled": False}
+    r7d = features.resolve_setup("clickup_create_task_from_hiver", clickup_fs_all_skipped,
+                                 clickup_connected)
+    check("skipping BOTH optional steps still reaches complete, never blocked forever",
+          r7d["status"] == "complete"
+          and r7d["feature"]["prefill_fields"] == {}
+          and r7d["feature"]["quick_access_enabled"] is False)
+
+    salesforce_write_feature = r5["feature"]
+    check("Salesforce's write feature never gets steps 5/6 -- scoped to "
+          "ClickUp only for this pass",
+          "prefill_fields" not in salesforce_write_feature
+          or salesforce_write_feature.get("prefill_fields") == {})
 
     clickup_feature = r7["feature"]
     tc4 = features.test_create(clickup_feature,
@@ -160,6 +206,18 @@ def run():
     tc5 = features.test_create(clickup_feature, {"Title": "Follow up", "Priority": "High"})
     check("test_create still rejects an unexposed field for a second app too",
           tc5["status"] == "error" and "Priority" in tc5["reason"])
+
+    # ---- step 5's prefill defaults actually reach a manual create when the
+    # agent leaves that field blank -- the whole point of "prefilling values
+    # in the fields while creating tasks manually" (2026-08-26)
+    tc7 = features.test_create(clickup_feature, {"Title": "Follow up"})
+    check("List left blank -> falls back to its configured prefill default, "
+          "never left empty when a default exists",
+          tc7["status"] == "ok" and tc7["record"]["list"] == "Support Escalations")
+
+    tc8 = features.test_create(clickup_feature, {"Title": "Follow up", "List": "Bugs"})
+    check("an agent's own submitted value always overrides its prefill default",
+          tc8["status"] == "ok" and tc8["record"]["list"] == "Bugs")
 
     tc6 = copilot.test_create_feature(
         clickup_feature, {"Title": "Follow up", "List": "Support Escalations"},
