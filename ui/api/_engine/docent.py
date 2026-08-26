@@ -124,12 +124,13 @@ def _integration_answer(t):
     recipes = [r for r in schema.RECIPES.values() if r["app"] in apps_to_cover]
     b_parts = []
     if natives:
-        b_parts.append("a native action block — " + ", ".join(
-            f"{n['name']} ({_disp(n['app'])})" for n in natives)
-            + " — Hiver's own pre-built integration, no lookups involved")
+        b_parts.append("a built-in action Hiver already supports — " + "; ".join(
+            f"{n['name']} ({_disp(n['app'])}) — {n['description'].rstrip('.')}"
+            for n in natives))
     if recipes:
         b_parts.append("; ".join(
-            f"a ready-made recipe — {r['name']} — {r['description']}" for r in recipes))
+            f"a ready-made recipe — {r['name']} — {r['description'].rstrip('.')}"
+            for r in recipes))
     if "salesforce" in apps_to_cover:
         b_parts.append(
             "I can also compose a Salesforce lookup on the fly for other asks that fit "

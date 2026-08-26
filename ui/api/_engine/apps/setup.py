@@ -22,6 +22,23 @@ Usecase-wise steps"), enabling a feature is:
                                   "Enable?" yes/no CTA, since a feature like
                                   this is meaningfully scoped per inbox, not
                                   global to the whole workspace.
+  5. Prefill Fields (optional) -- default values for the write form's own
+                                  fields (step 3's choices), so a manually-
+                                  created record starts pre-filled. ClickUp's
+                                  write feature only (2026-08-26) — see the
+                                  `is_write and app == "clickup"` gate below.
+  6. Quick Access (optional)   -- a toggle recording whether a task badge
+                                  should show on the conversation for easy
+                                  access back to a created task. Recorded
+                                  only, like every other "(demo: recorded
+                                  here...)" toggle in this engine — no live
+                                  badge is actually rendered anywhere.
+                                  ClickUp's write feature only, same gate.
+
+Steps 5 and 6 are OPTIONAL in a specific sense: each still gets ASKED once
+(resolve_setup won't silently skip past it), but "skip" is always a legal
+answer that resolves it — neither can block the feature from reaching
+"complete" forever the way steps 1-4 can.
 
 resolve_setup() walks these in order, one blocking question at a time —
 the same MAX-1-thing-at-a-time discipline automation/validator.py uses,
@@ -45,9 +62,11 @@ feature is a data entry in apps/schema.py's FEATURES plus real fields
 marked view/write in app_catalog.py, no changes needed here.
 SHAPED BY HAVING SEEN TWO EXAMPLES: only Account/Contact have catalog
 entries at all, and only the two FEATURES entries that exist (one view, one
-write) are wired up. Prefill fields, Quick Access, and Syncing Hiver
-conversations with SF records (the product spec's other listed setup
-steps) are explicitly NOT built here — out of scope for this pass.
+write) are wired up. Syncing Hiver conversations with SF records (the
+product spec's other listed setup step) is explicitly NOT built here — out
+of scope for this pass. Prefill Fields and Quick Access (steps 5/6 above)
+ARE built, but ClickUp-only for now (2026-08-26) — Salesforce's write
+feature doesn't offer them yet.
 """
 import app_catalog
 import clickup_mock
@@ -171,7 +190,11 @@ def test_create(feature, field_values):
     {label: value} submitted from the test form; a label outside
     fields_by_object is REJECTED, not silently dropped — the same "never
     let a submission smuggle in something not configured" discipline every
-    provenance check in this engine already holds itself to.
+    provenance check in this engine already holds itself to. Any field the
+    admin left blank falls back to `feature['prefill_fields']` (step 5, the
+    ClickUp write feature's own default values, {} for every other
+    feature) — a submitted value always wins over its own default, never
+    the other way around.
 
     SHAPED BY TWO EXAMPLES: creates a Salesforce Contact or a ClickUp Task —
     the two write features this pass offers, dispatched via _CREATE_OPS by
@@ -190,8 +213,11 @@ def test_create(feature, field_values):
     if unknown:
         return {"status": "error",
                 "reason": f"not exposed by this feature: {', '.join(unknown)}"}
+    prefill = {k: v for k, v in (feature.get("prefill_fields") or {}).items()
+              if k in chosen_labels}
+    merged_values = {**prefill, **{k: v for k, v in field_values.items() if v not in (None, "")}}
     api_by_label = app_catalog.field_by_label(feature["app"], object_name)
-    api_fields = {api_by_label[label]: value for label, value in field_values.items()
+    api_fields = {api_by_label[label]: value for label, value in merged_values.items()
                  if label in api_by_label and value not in (None, "")}
     record = op(api_fields)
     return {"status": "ok", "object": object_name, "record": record}
@@ -321,12 +347,63 @@ def resolve_setup(feature_id, feature_setup, apps_ws, ws=None):
                       multiple=True)
         return _result("needs_info", errors=errors, missing=[q], progress=progress)
 
+    # ---- steps 5 & 6 (ClickUp's write feature only): Prefill Fields + Quick
+    # Access — the Apps Activation PRD (2026-08-24) lists both as real setup
+    # steps, but a live product review (2026-08-26) scoped them to ClickUp
+    # for this pass (Salesforce's write feature doesn't get them yet). BOTH
+    # are OPTIONAL — a "skip" answer resolves the step exactly like an
+    # answer with values does; neither ever blocks the feature from
+    # completing forever, they just have to be ASKED once first.
+    prefill_fields = {}
+    quick_access_enabled = None
+    if is_write and app == "clickup":
+        prefill_requested = feature_setup.get("prefill_requested")
+        progress["prefill_requested"] = prefill_requested
+        if prefill_requested is None:
+            task_fields = fields_by_object.get("Task", [])
+            q = {
+                "slot": "feature_setup.prefill_fields",
+                "prompt": ("Optional — want to prefill default values for any of these "
+                          f"fields when agents create a task manually? "
+                          f"({', '.join(task_fields)}) You can leave this blank and say "
+                          "\"skip\" to move on."),
+                "kind": "form",
+                "fields": [{"key": fld, "label": fld, "required": False, "value": ""}
+                          for fld in task_fields],
+                "options": [], "multiple": False, "allow_other": True, "other_hint": "",
+            }
+            return _result("needs_info", missing=[q], progress=progress)
+        if prefill_requested:
+            allowed = set(fields_by_object.get("Task", []))
+            prefill_fields = {p["field"]: p["value"]
+                              for p in (feature_setup.get("prefill_fields") or [])
+                              if p.get("field") in allowed and p.get("value")}
+        progress["prefill_fields"] = prefill_fields
+
+        quick_access_enabled = feature_setup.get("quick_access_enabled")
+        progress["quick_access_enabled"] = quick_access_enabled
+        if quick_access_enabled is None:
+            q = _question(
+                "feature_setup.quick_access_enabled",
+                "Optional — enable Quick Access? Shows a task badge on the conversation "
+                "once a task's created from it, for easy access back to it. (demo: "
+                "recorded here, not an actual badge on the conversation)",
+                [{"label": "Enable it", "value": "yes, enable quick access"},
+                 {"label": "Skip", "value": "skip quick access"}])
+            return _result("needs_info", missing=[q], progress=progress)
+
     feature_out = {
         "id": feature_id, "app": app, "name": f["name"], "description": f["description"],
         "objects": objects, "fields_by_object": fields_by_object, "inboxes": inboxes,
         # the UI needs this to decide preview vs. test_create rendering —
         # never inferred client-side from field names or anything else.
         "kind": f.get("kind", "view"),
+        # steps 5 & 6 above — {} / False for every OTHER feature (the
+        # `is_write and app == "clickup"` gate never ran for them), same
+        # "honest default, not a fabricated value" stance as everywhere
+        # else in this module.
+        "prefill_fields": prefill_fields,
+        "quick_access_enabled": bool(quick_access_enabled),
     }
     # "test on a real conversation" (capability 7) — a courtesy shown
     # ALONGSIDE completion, never blocking it: the feature is already fully

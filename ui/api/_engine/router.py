@@ -98,15 +98,19 @@ cards for my shared mailbox" misclassified as an automation/connector ask):
     The "when X happens" trigger shape is what makes it automation, not the app.
   - When a phrase could plausibly name EITHER an APP FEATURES entry (Track A) or a
     CONNECTOR AUTOMATIONS entry (Track B) for the SAME app — e.g. ClickUp has both
-    clickup_create_task_from_hiver ("Create a Task from Hiver", Track A — an agent
-    fills in a form once enabled, by hand, on whatever conversation they're looking
-    at) and clickup_create_task ("Create a ClickUp task", Track B NATIVE_ACTIONS — an
-    automation fires it on a trigger, no agent involved) — match the phrase against
-    BOTH lists by name/wording, not just APP FEATURES. A message naming or describing
-    the Track B entry ("Create a ClickUp task", or any "when X happens, create a
-    ClickUp task" framing) is automation, even though an APP FEATURES entry for the
-    same app also exists. Only route to app_setup when the phrase actually matches
-    the APP FEATURES entry's own by-hand framing.
+    clickup_create_task_from_hiver ("Create task manually from conversations",
+    Track A — an agent fills in a form once enabled, by hand, on whatever
+    conversation they're looking at) and clickup_create_task ("Create tasks
+    automatically via automation", Track B NATIVE_ACTIONS — an automation fires it
+    on a trigger, no agent involved) — match the phrase against BOTH lists by name/
+    wording, not just APP FEATURES. A message naming or describing the Track B
+    entry, or any "when X happens, create a ClickUp task" framing, is automation,
+    even though an APP FEATURES entry for the same app also exists. Only route to
+    app_setup when the phrase actually matches the APP FEATURES entry's own
+    by-hand framing. The two names are now deliberately spelled out ("...
+    automatically via automation" vs "...manually from conversations") so a
+    free-form ask that doesn't quote either name verbatim still has to be judged
+    on the SAME by-hand-vs-triggered distinction, not just name-matching.
   - An app-setup-sounding ask that doesn't match any APP FEATURES entry (wrong app,
     or a real idea not built yet) is NOT app_setup either — track it as "automation"
     anyway (the automation extractor's unsupported/unmappable handling names the gap

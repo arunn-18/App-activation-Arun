@@ -1,6 +1,6 @@
 # PRD — Apps Activation: an app-agnostic capability engine
 
-**Status:** Implemented (v2.17) · **Owner:** Arun Nayak · **Last updated:** 2026-08-24
+**Status:** Implemented (v2.18) · **Owner:** Arun Nayak · **Last updated:** 2026-08-26
 **Related:** [PR #1](https://github.com/arunn-18/App-activation-Arun/pull/1) · `engine/README.md` (dev changelog)
 
 ---
@@ -50,8 +50,8 @@ At the same time, admins setting up an app capability get no explanation of *why
 | 1 | Auth | shared | `connected_apps.json` + `connected_apps.py` (prerequisite/connection state, pinned `api_version`) |
 | 2 | Record-level configuration | A | `apps/setup.py` step 2 — pick objects from `app_catalog.objects_for()` |
 | 3 | Field config — view usecase | A | `apps/setup.py` step 3 — pick fields from `app_catalog.field_catalog()` |
-| 4 | Field config — write usecase | A | same step, sourced from `app_catalog.writable_field_catalog()`; `FEATURES[...]["kind"] == "write"` — proven on TWO apps (`salesforce_create_contact`, `clickup_create_task_from_hiver`) |
-| 5 | App-native automation | B | `automation/schema.py: NATIVE_ACTIONS` — a pre-built Hiver action block, not a composed call |
+| 4 | Field config — write usecase | A | same step, sourced from `app_catalog.writable_field_catalog()`; `FEATURES[...]["kind"] == "write"` — proven on TWO apps (`salesforce_create_contact`, `clickup_create_task_from_hiver`). Two OPTIONAL follow-on steps, ClickUp only (v2.18): Prefill Fields (default values for the write form) and Quick Access (a recorded-only badge toggle) |
+| 5 | App-native automation | B | `automation/schema.py: NATIVE_ACTIONS` — a pre-built Hiver action block, not a composed call. ClickUp's `clickup_create_task` (v2.18) asks the admin WHEN + WHAT TO LOOK FOR before ever rendering the card, instead of silently defaulting the trigger and assuming "runs on everything" |
 | 6 | API-driven automation | B | `automation/schema.py: RECIPES` (hand-vetted) or a model-composed `custom_plan` (validated by `plan_validator.py`) |
 
 A request that fits none of these — no matching `FEATURES` entry, no `NATIVE_ACTIONS`, no valid `custom_plan`, no `RECIPES` match — is escalated honestly as `unsupported_requests`, never forced into the nearest available bucket.
@@ -121,18 +121,48 @@ All new capabilities ship with a pure-code, no-LLM test suite (routing/extractio
 
 | Suite | Coverage | Result |
 |---|---|---|
-| `test_validator.py` | automation schema/validator core, incl. `enabled_inboxes` | 56/56 core + 62/62 units |
+| `test_validator.py` | automation schema/validator core, incl. `enabled_inboxes`, ClickUp's ask-before-showing scope override | 56/56 core + 67/67 units |
 | `test_connector.py` | recipe-based connector, incl. `connect_requested` | 29/29 |
 | `test_connector_planner.py` | dynamic-plan guardrails | 18/18 |
 | `test_track_a.py` | full app-setup flow incl. write usecase | 45/45 |
-| `test_native_action.py` | native-action mechanism (ClickUp), 6-field form, app-scoped vocab | 24/24 |
-| `test_mapping_explanation.py` | step-3 explanation, all mechanisms | 7/7 |
-| `test_real_conversation.py` | step-7 real-conversation testing, incl. ClickUp write feature | 23/23 |
+| `test_native_action.py` | native-action mechanism (ClickUp), 6-field form, app-scoped vocab, ask-before-showing scope block | 28/28 |
+| `test_mapping_explanation.py` | step-3 explanation, all mechanisms, app-aware wording (not hardcoded to Salesforce) | 9/9 |
+| `test_real_conversation.py` | step-7 real-conversation testing incl. ClickUp write feature, Prefill Fields/Quick Access (steps 5/6), mailbox-scoped + contact-match-optional `testable_conversations()` | 35/35 |
 | `test_feature_request_offer.py` | Discovery's feature-request offer, self-serve remediation, example-phrasing wiring, capability-question suppression + app-scoped badges/prose | 26/26 |
 
 No regression to any pre-existing assertion across the whole body of work. UI (`ui/lib/api.ts`, `RuleCard.tsx`, `FeatureCard.tsx`, `CapabilityBadges.tsx`) kept in lockstep, `npx tsc --noEmit` clean.
 
 Also a golden eval set, `eval/apps-eval-set.jsonl` (12 records, graded by a small parallel harness — `apps_grader.py`/`apps_report.py`) — the first eval coverage for Track A ("Apps" panel) capabilities and the router boundary between Track A/B, not just Track B automations. See `eval/README.md`'s own "Apps set" section.
+
+## 10a. ClickUp UX-clarity pass (v2.18, 2026-08-26)
+
+A live product review of ClickUp's two capabilities asked for five things
+together, all shipped in this pass — see `engine/README.md`'s v2.18 entry
+for the full writeup:
+
+1. **Chip/badge naming** now states the track: "Create tasks automatically
+   via automation" (Track B) vs. "Create task manually from conversations"
+   (Track A) — previously both read as "create a ClickUp task."
+2. **Description wording** dropped internal engineering jargon ("not an
+   API call this engine composes"); a real bug was fixed along the way —
+   the mapping explanation said "an existing Salesforce app capability"
+   for *any* matched Track A feature, ClickUp's included.
+3. **Ask-before-showing**, scoped to `clickup_create_task` only: the
+   RuleCard no longer appears pre-filled with a silently-defaulted trigger
+   and an assumed "runs on everything" scope — the admin is asked WHEN and
+   WHAT TO LOOK FOR first, with a legal "every conversation" escape hatch.
+4. **Prefill Fields + Quick Access** — two new optional setup steps for
+   `clickup_create_task_from_hiver` (capability 4's write branch), never
+   blocking completion, both skippable.
+5. **Mailbox picker** ahead of the existing conversation picker in
+   capability 7's write-test flow, scoped to the feature's own enabled
+   inbox(es) — plus an app-aware fix so ClickUp's testable conversations
+   aren't filtered by Salesforce contact matching, a concept ClickUp's
+   write feature never had.
+
+All five were scoped narrowly (ClickUp only, or the one feature/action
+that needed it) rather than generalized speculatively — Salesforce's
+existing capabilities are untouched by this pass.
 
 ## 11. Open questions
 
@@ -217,15 +247,17 @@ engine/
 ├── simulate.py                    # multi-turn self-play simulation harness
 ├── make_mailbox.py / mailbox.json # demo inbox fixture
 │
-├── test_validator.py              # automation schema/validator suite — 56/56 core, 62/62 units
+├── test_validator.py              # automation schema/validator suite — 56/56 core, 67/67 units
 ├── test_connector.py              # connector recipe suite — 29/29
 ├── test_connector_planner.py      # dynamic-plan guardrail suite — 18/18
 ├── test_track_a.py                # app-setup flow suite — 45/45 (write-usecase branch, 2 apps)
-├── test_native_action.py          # ClickUp native-action suite — 24/24 (6 fields, one-block form)
-├── test_mapping_explanation.py    # step-3 explanation suite — 7/7
-├── test_real_conversation.py      # capability 7 suite — 23/23 (2 apps' write features)
-├── test_feature_request_offer.py  # Discovery/remediation/example-phrasing suite — 21/21
-└── README.md                      # dev changelog (through the v2.14 Discovery-offer entry)
+├── test_native_action.py          # ClickUp native-action suite — 28/28 (6 fields, one-block form,
+│                                     ask-before-showing scope block)
+├── test_mapping_explanation.py    # step-3 explanation suite — 9/9 (app-aware wording)
+├── test_real_conversation.py      # capability 7 suite — 35/35 (2 apps' write features, Prefill
+│                                     Fields/Quick Access, mailbox-scoped conversation picker)
+├── test_feature_request_offer.py  # Discovery/remediation/example-phrasing suite — 26/26
+└── README.md                      # dev changelog (through the v2.18 ClickUp UX-clarity entry)
 ```
 
 ---

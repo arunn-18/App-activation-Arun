@@ -931,6 +931,67 @@ No regressions across all 8 suites (239 unit cases; the existing prose
 assertions in `test_feature_request_offer.py` still hold with the added
 lead-in). `npx tsc --noEmit` clean.
 
+## ClickUp UX-clarity pass: naming, wording, ask-before-showing, prefill + quick access, mailbox picker (v2.18, 2026-08-26)
+
+A live product review of ClickUp's two capabilities (Track A's by-hand task
+creation, Track B's automation) asked for five things together:
+
+1. **Chip/badge naming.** `NATIVE_ACTIONS["clickup_create_task"]` ->
+   "Create tasks automatically via automation" (Track B) and
+   `FEATURES["clickup_create_task_from_hiver"]` -> "Create task manually
+   from conversations" (Track A) — the two names are now self-explanatory
+   about which track they belong to, instead of both reading as "create a
+   ClickUp task." `router.py`'s disambiguation example, `RuleCard.tsx`'s
+   fallback label, `example_phrasings`, and the eval set/grader/README that
+   encoded the old chip text as literal test data were all updated to
+   match.
+2. **Description wording.** Dropped internal engineering jargon ("not an
+   API call this engine composes", "no lookups involved") from the native
+   action's description and the mapping-explanation/docent prose that
+   quotes it. Also fixed a real bug found along the way:
+   `copilot._mapping_explanation()` said "an existing Salesforce app
+   capability" for **every** matched Track A feature, ClickUp's included —
+   now reads the app off the matched feature itself.
+3. **Ask before showing the card.** `clickup_create_task` used to render a
+   RuleCard immediately, pre-filled with a silently-defaulted trigger and
+   an assumed "runs on every matching conversation" scope. Now scoped
+   ONLY to this one native action: `automation/extract.py` (rule 22)
+   overrides rule 4's trigger default — trigger stays null until the user
+   actually says when — and `automation/validator.py` turns the "no
+   conditions" case from a silent assumption into a blocking question
+   (with an "every conversation" escape hatch) for this action only. The
+   UI's `hasRuleCard()` holds the card back while a spec is *just* this
+   one still-unconfirmed action; once both are given, the card reveals
+   and the existing native-action field form takes over unchanged.
+4. **Prefill Fields + Quick Access.** Two new OPTIONAL steps (5 and 6) in
+   `apps/setup.py`'s `resolve_setup()`, scoped to
+   `clickup_create_task_from_hiver` only (Salesforce's write feature is
+   untouched). Prefill Fields asks once, as a "one block" form, for
+   default values on the write form's own fields — "skip" is always a
+   legal answer, wired into `test_create()` so a field left blank falls
+   back to its configured default (a submitted value always wins). Quick
+   Access is a recorded-only toggle (no live badge anywhere) for whether a
+   task badge should show on the conversation — same "(demo: recorded
+   here...)" stance every other toggle in this engine already takes.
+   Both get asked once but can never block completion forever.
+5. **Mailbox picker before the conversation picker.** Capability 7's
+   write-test flow jumped straight from "pick a real conversation" to the
+   create-form. `mailbox_lookup.testable_conversations()` gained
+   `inboxes` (scope to the feature's own ENABLED inbox(es), never the
+   whole workspace) and `require_contact_match` (ClickUp's write feature
+   has no contact concept at all — `clickup_mock.create_task` takes no
+   sender argument — so Salesforce-contact filtering was always going to
+   be noise for it, not an honest match). `FeatureCard.tsx`'s
+   `WriteTestForm` gained a mailbox-picker step ahead of the existing
+   conversation picker (skipped when the feature has only one enabled
+   inbox).
+
+No regressions across all 8 suites (257 unit cases, up from 239 — new
+coverage for the app-aware mapping-explanation fix, the blocking-scope
+override, steps 5/6, and the mailbox/contact-match scoping). `eval/apps-
+eval-set.jsonl`'s router-boundary records (apps-008/009/010) updated to
+the new chip text. `npx tsc --noEmit` clean. `ui/api/_engine` re-vendored.
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session
