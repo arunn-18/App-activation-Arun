@@ -355,8 +355,8 @@ function capitalize(s: string): string {
 }
 
 /** The message sent when a suggestion chip is clicked. Just the capability's
- *  own name — e.g. "Create a Contact from Hiver", "Create a ClickUp task" —
- *  not a templated "Set up: X — Y" string. A live test found that template
+ *  own name — e.g. "Create a Contact from Hiver", "Create tasks automatically
+ *  via automation" — not a templated "Set up: X — Y" string. A live test found that template
  *  actively hurt classification: the router/extractor read "Set up: <name>
  *  — <description>" as too generic/automation-shaped, misrouting real
  *  Track A asks. Every catalog name here was already written to read as a

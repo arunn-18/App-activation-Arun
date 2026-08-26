@@ -227,7 +227,7 @@ def run():
           "claiming a ClickUp capability, just explaining the category)",
           "ClickUp" in s6["capability_answer"]
           and not s6["capability_answer"].startswith("Salesforce")
-          and "Create a Task from Hiver" in s6["capability_answer"]
+          and "Create task manually from conversations" in s6["capability_answer"]
           and "Create a Contact from Hiver" not in s6["capability_answer"])
     check("a spuriously-defaulted trigger (rule 4's own default, not a real "
           "ask) must NOT keep the 'what should happen when this fires?' "
@@ -278,7 +278,7 @@ def run():
     check("docent's integration answer now covers ClickUp's Track A feature "
           "too (a real pre-existing gap the salesforce-only filter had), "
           "with a concrete example phrasing, not just a restated description",
-          "Create a Task from Hiver" in a and "let agents create a ClickUp task" in a)
+          "Create task manually from conversations" in a and "let agents create a ClickUp task" in a)
 
     print(f"feature-request-offer unit cases: {units - fails}/{units} passed")
     print("PASS" if fails == 0 else f"FAIL ({fails})")

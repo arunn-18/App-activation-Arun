@@ -174,7 +174,8 @@ with a `feature_id` are scripted all the way to `status: complete` and
 diffed field-by-field (objects/fields/inboxes as set comparisons — order
 never matters); records that are just `{"track": "..."}` (the router-
 boundary cases, which can't reach completion in the scripted turns — a bare
-"Create a ClickUp task" has no list/title yet on either track) are graded
+"Create tasks automatically via automation" has no list/title yet on
+either track) are graded
 purely on which track the output implies plus `must_mention`/
 `must_not_mention` substrings, the same behavioral-assertion mechanism
 `con-004`/`con-005` above already use for their own escalation cases.

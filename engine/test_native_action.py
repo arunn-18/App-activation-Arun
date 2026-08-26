@@ -173,14 +173,14 @@ def run():
           r6["status"] == "needs_info"
           and r6["questions_structured"]
           and r6["questions_structured"][0]["slot"] == "actions[0].recipe"
-          and any(o["label"] == "Create a ClickUp task"
+          and any(o["label"] == "Create tasks automatically via automation"
                   for o in r6["questions_structured"][0]["options"]))
 
     # ---- rendering: draft text, exported JSON, real test-run ------------------
     draft = copilot.render_structure(spec)
     check("draft shows the native action by name and its two params, not a "
           "generic 'connector' line",
-          "Create a ClickUp task" in draft and "Support Escalations" in draft
+          "Create tasks automatically via automation" in draft and "Support Escalations" in draft
           and "Follow up with customer" in draft)
 
     final = copilot.to_final_json(spec)

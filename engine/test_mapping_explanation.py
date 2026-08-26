@@ -125,7 +125,7 @@ def run():
         check("Track B native action: names the matched native action, flags it as "
               "native (not composed)",
               s["mapping_explanation"] is not None
-              and "Create a ClickUp task" in s["mapping_explanation"]
+              and "Create tasks automatically via automation" in s["mapping_explanation"]
               and "not an API call this engine composes" in s["mapping_explanation"])
     finally:
         automation_extract.extract = original_automation_extract

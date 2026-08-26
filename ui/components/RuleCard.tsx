@@ -199,7 +199,7 @@ function ActionLine({ a }: { a: Action }) {
       // recipe id below: hardcode the one known id's display name.
       if (a.native_action_id) {
         const nativeLabel = a.native_action_id === "clickup_create_task"
-          ? "Create a ClickUp task"
+          ? "Create tasks automatically via automation"
           : a.native_action_id;
         return (
           <>

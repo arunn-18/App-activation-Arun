@@ -52,7 +52,8 @@ export interface Action {
   recipe?: string | null;
   test_contact_email?: string | null;
   /** A native app-action automation (v2.12, capability 5) — Hiver's own
-   *  pre-built action block (e.g. "Create a ClickUp task"), NOT an API call
+   *  pre-built action block (e.g. "Create tasks automatically via
+   *  automation"), NOT an API call
    *  this engine composes. target_name (which list/board/channel) and
    *  title_hint (what it should be titled/about) are its two generic slots
    *  (engine/schema.py's NATIVE_ACTIONS). Mutually exclusive with

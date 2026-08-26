@@ -67,7 +67,7 @@ FEATURES = {
     "clickup_create_task_from_hiver": {
         "app": "clickup",
         "kind": "write",
-        "name": "Create a Task from Hiver",
+        "name": "Create task manually from conversations",
         # Deliberately a different id from automation/schema.py's
         # NATIVE_ACTIONS["clickup_create_task"] — this is Track A (an agent
         # manually creates one task, once, from an open conversation);
@@ -80,7 +80,7 @@ FEATURES = {
         "prerequisites": ["clickup_connected"],
         "object_choices": ["Task"],
         "example_phrasings": ["let agents create a ClickUp task directly from a conversation",
-                              "Create a Task from Hiver"],
+                              "Create task manually from conversations"],
     },
 }
 

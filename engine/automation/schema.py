@@ -247,7 +247,7 @@ RECIPES = {
 NATIVE_ACTIONS = {
     "clickup_create_task": {
         "app": "clickup",
-        "name": "Create a ClickUp task",
+        "name": "Create tasks automatically via automation",
         "description": ("Creates a task in a ClickUp list from this conversation — a "
                         "native Hiver action block, not an API call this engine composes."),
         "op": "create_task",

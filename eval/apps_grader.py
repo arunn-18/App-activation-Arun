@@ -22,9 +22,10 @@ Two grading modes, chosen by what `ideal_output` contains:
 
   2. Router-boundary only (`ideal_output` is just {"track": "..."}): used
      for records that deliberately DON'T reach completion in the scripted
-     turns (a bare "Create a ClickUp task" has no list/title yet on either
-     track) — there is no fenced-JSON signal to diff, since both tracks
-     legitimately emit `null` while incomplete. Graded purely on which
+     turns (a bare "Create tasks automatically via automation" has no
+     list/title yet on either track) — there is no fenced-JSON signal to
+     diff, since both tracks legitimately emit `null` while incomplete.
+     Graded purely on which
      track the parsed output (or lack of one) implies, plus the record's
      own must_mention/must_not_mention substrings — the SAME behavioral-
      assertion mechanism the connector set's con-004/con-005 already use
