@@ -742,6 +742,34 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None, app=None):
         result["questions_structured"] = []
         result["questions_pending"] = 0
 
+    # A live test surfaced the related case: the WHOLE ask can be unmappable
+    # (e.g. "close the Hiver conversation when the linked ClickUp task
+    # closes" — a trigger this engine has no vocabulary for at all, see
+    # extract.py rule 4c) with NOTHING legal left over — no trigger, no
+    # actions, no conditions. The validator's own WHEN/IF/THEN placeholder
+    # questions still fired in that case, implying a real rule skeleton is
+    # there to keep filling in, when there's actually nothing left to
+    # build. The honest move is to say so (the "left out of this rule"
+    # explanation already does) and offer the feature-request courtesy —
+    # not solicit answers for a rule with zero real content. The
+    # feature_request_offer question `_apply_feature_request_offer` may have
+    # just added above is the one exception kept: it's the whole point of
+    # this branch, not a leftover to suppress.
+    if (result.get("feature_request") is None and (spec.get("unmappable") or [])
+            and not (spec.get("actions") or []) and not spec.get("trigger")
+            and not any(spec.get("condition_groups") or [])):
+        result["questions_structured"] = [
+            q for q in (result.get("questions_structured") or [])
+            if q.get("slot") == "feature_request_offer"]
+        # `questions` (plain strings, drives respond()'s prose) deliberately
+        # never carries the feature-request offer's own prompt in the first
+        # place — _apply_feature_request_offer() only ever appends it to
+        # questions_structured, so that question renders exclusively via the
+        # structured form, never inline. Emptying (not rebuilding from
+        # questions_structured) preserves that asymmetry.
+        result["questions"] = []
+        result["questions_pending"] = 0
+
     # capability questions: the model only classifies (router.py); the answer
     # is composed in code from schema.py so nothing unbuildable is ever
     # taught. A question is never a closing.

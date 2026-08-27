@@ -311,6 +311,79 @@ def run():
           "does NOT repeat the whole overview verbatim a second time",
           turn2["capability_answer"] != turn1["capability_answer"])
 
+    # ---- a wholly-unmappable ask stops asking WHEN/IF/THEN questions ------
+    # (2026-08-27 live review): "close the Hiver conversation when the
+    # linked ClickUp task closes" needs a trigger this engine has no
+    # vocabulary for at all (extract.py rule 4c) -- when NOTHING legal
+    # survives (no trigger, no actions, no conditions), the validator's own
+    # WHEN/IF/THEN placeholder questions used to keep firing anyway, as if
+    # there were a real rule skeleton left to fill in. Only the
+    # feature-request offer question should remain.
+    def _fake_classify_automation(client, messages, model=None):
+        return {"intent_summary": "t", "track": "automation",
+                "capability_question": None, "no_intent": None}
+
+    def _fake_extract_wholly_unmappable(client, messages, model=None, ws=None,
+                                        on_event=None, app=None):
+        return {"trigger": None, "scope_confirmed": False, "condition_groups": [],
+                "actions": [], "ai_extract": None, "unsupported_requests": [],
+                "closing": False, "capability_question": None, "no_intent": None,
+                "unmappable": [{"request": "trigger off the ClickUp task closing",
+                                "why": "this engine's triggers only fire on Hiver "
+                                       "conversation events, never on another "
+                                       "app's own state change"}],
+                "intent_summary": "t", "enabled_inboxes": None,
+                "feature_request_requested": None}
+
+    feature_requests.reset()
+    oc3, oae3 = router.classify, automation_extract.extract
+    router.classify = _fake_classify_automation
+    automation_extract.extract = _fake_extract_wholly_unmappable
+    try:
+        s7 = copilot.respond_structured(
+            None, [{"role": "user", "content": "close the hiver conversation "
+                                                "when the clickup task closes"}])
+    finally:
+        router.classify, automation_extract.extract = oc3, oae3
+    check("wholly-unmappable turn: WHEN/trigger and THEN/actions questions "
+          "are gone -- nothing legal left to ask about",
+          not any(q["slot"] in ("trigger", "actions") for q in s7["questions_structured"]))
+    check("the feature-request offer question is the ONE question that "
+          "survives -- the whole reason this branch exists",
+          any(q["slot"] == "feature_request_offer" for q in s7["questions_structured"]))
+    check("the gap itself still surfaces in unmappable, unchanged",
+          s7["unmappable"]
+          and s7["unmappable"][0]["request"] == "trigger off the ClickUp task closing")
+
+    # contrast: unmappable ALONGSIDE a genuinely separate, fireable action
+    # must NOT get this treatment -- there IS something real to keep asking
+    # about (a trigger, for the real "tag VIP" action), so the ordinary
+    # WHEN question must survive rather than being swallowed.
+    def _fake_extract_partial_unmappable(client, messages, model=None, ws=None,
+                                         on_event=None, app=None):
+        return {"trigger": None, "scope_confirmed": False,
+                "condition_groups": [], "actions": [{"type": "tag", "tags": ["VIP"]}],
+                "ai_extract": None, "unsupported_requests": [], "closing": False,
+                "capability_question": None, "no_intent": None,
+                "unmappable": [{"request": "trigger off the ClickUp task closing",
+                                "why": "this engine's triggers only fire on Hiver "
+                                       "conversation events"}],
+                "intent_summary": "t", "enabled_inboxes": None,
+                "feature_request_requested": None}
+
+    router.classify = _fake_classify_automation
+    automation_extract.extract = _fake_extract_partial_unmappable
+    try:
+        s8 = copilot.respond_structured(
+            None, [{"role": "user", "content": "tag VIP, and also close it when "
+                                                "the clickup task closes"}])
+    finally:
+        router.classify, automation_extract.extract = oc3, oae3
+    check("unmappable ALONGSIDE a real action -- the WHEN question for that "
+          "real action survives, unlike the wholly-unmappable case above",
+          any(q["slot"] == "trigger" for q in s8["questions_structured"])
+          and s8["unmappable"])
+
     # ---- self-serve remediation: a non-one-click prerequisite says HOW -----
     check("connected_apps.remediation_for names a real prerequisite's fix",
           connected_apps.remediation_for("account_team_enabled") is not None

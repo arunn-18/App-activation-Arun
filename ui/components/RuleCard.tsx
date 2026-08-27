@@ -493,6 +493,15 @@ export default function RuleCard({
       gaps.push(g);
   }
   const fillKey = JSON.stringify(turn.rule ?? turn.draft); // re-trigger fill animation per turn
+  // The WHOLE ask can be unmappable (e.g. "close the Hiver conversation
+  // when the linked ClickUp task closes" -- a trigger this engine has no
+  // vocabulary for at all) with NOTHING legal left over. A live test found
+  // the WHEN/IF/THEN rows still rendering as blank "Hole" placeholders in
+  // that case, implying there's a real rule skeleton to keep filling in
+  // when there's nothing left to build -- misleading on top of the gaps
+  // panel above, which already tells the whole story on its own.
+  const nothingBuildable = gaps.length > 0 && !spec.trigger
+    && spec.actions.length === 0 && groups.length === 0 && aiVars.length === 0;
 
   const copyJson = async () => {
     await navigator.clipboard.writeText(JSON.stringify(turn.rule, null, 2));
@@ -513,11 +522,13 @@ export default function RuleCard({
             ? "Applied ✓"
             : turn.done
               ? "Final — ready to build"
-              : gaps.length
-                ? `Built with ${gaps.length} exclusion${gaps.length > 1 ? "s" : ""}`
-                : turn.status === "complete" && scopeAssumption
-                  ? "Ready — 1 assumption"
-                  : STATUS_LABEL[turn.status]}
+              : nothingBuildable
+                ? "Not supported"
+                : gaps.length
+                  ? `Built with ${gaps.length} exclusion${gaps.length > 1 ? "s" : ""}`
+                  : turn.status === "complete" && scopeAssumption
+                    ? "Ready — 1 assumption"
+                    : STATUS_LABEL[turn.status]}
         </span>
       </div>
 
@@ -542,112 +553,114 @@ export default function RuleCard({
         </div>
       )}
 
-      <div key={fillKey} className="slot-filled px-4">
-        <Row k="WHEN">
-          {spec.trigger ? (
-            // the builder's own label — the only vocabulary users can verify
-            <span className="text-[13px] font-medium">
-              {vocab?.triggers[spec.trigger] ?? spec.trigger}
-            </span>
-          ) : (
-            <Hole hint="when should this run?" />
-          )}
-        </Row>
-
-        {aiVars.length > 0 && (
-          <Row k="AI">
-            {aiVars.map((v) => (
-              <span key={v.name} className="inline-flex flex-wrap items-baseline gap-1.5">
-                <Value>{v.name}</Value>
-                <span className="font-mono text-[11px] text-muted-foreground">{v.type}</span>
-                {v.options.length > 0 && (
-                  <span className="text-[12px] text-muted-foreground">
-                    one of {v.options.join(" / ")}
-                  </span>
-                )}
-                <span className="text-[12px] text-ink-soft">— {v.description}</span>
+      {!nothingBuildable && (
+        <div key={fillKey} className="slot-filled px-4">
+          <Row k="WHEN">
+            {spec.trigger ? (
+              // the builder's own label — the only vocabulary users can verify
+              <span className="text-[13px] font-medium">
+                {vocab?.triggers[spec.trigger] ?? spec.trigger}
               </span>
-            ))}
+            ) : (
+              <Hole hint="when should this run?" />
+            )}
           </Row>
-        )}
 
-        <Row k="IF">
-          {groups.length ? (
-            groups.map((g, gi) => (
-              <span key={gi} className="inline-flex flex-wrap items-baseline gap-1.5">
-                {gi > 0 && (
-                  <span className="font-mono text-[10px] font-semibold text-ink-soft">
-                    AND
-                  </span>
-                )}
-                {g.map((c, ci) => (
-                  <span key={ci} className="inline-flex items-baseline gap-1.5">
-                    {ci > 0 && (
-                      <span className="font-mono text-[10px] font-semibold text-ink-soft">
-                        OR
-                      </span>
-                    )}
-                    <ConditionLine c={c} vocab={vocab} />
-                  </span>
+          {aiVars.length > 0 && (
+            <Row k="AI">
+              {aiVars.map((v) => (
+                <span key={v.name} className="inline-flex flex-wrap items-baseline gap-1.5">
+                  <Value>{v.name}</Value>
+                  <span className="font-mono text-[11px] text-muted-foreground">{v.type}</span>
+                  {v.options.length > 0 && (
+                    <span className="text-[12px] text-muted-foreground">
+                      one of {v.options.join(" / ")}
+                    </span>
+                  )}
+                  <span className="text-[12px] text-ink-soft">— {v.description}</span>
+                </span>
+              ))}
+            </Row>
+          )}
+
+          <Row k="IF">
+            {groups.length ? (
+              groups.map((g, gi) => (
+                <span key={gi} className="inline-flex flex-wrap items-baseline gap-1.5">
+                  {gi > 0 && (
+                    <span className="font-mono text-[10px] font-semibold text-ink-soft">
+                      AND
+                    </span>
+                  )}
+                  {g.map((c, ci) => (
+                    <span key={ci} className="inline-flex items-baseline gap-1.5">
+                      {ci > 0 && (
+                        <span className="font-mono text-[10px] font-semibold text-ink-soft">
+                          OR
+                        </span>
+                      )}
+                      <ConditionLine c={c} vocab={vocab} />
+                    </span>
+                  ))}
+                </span>
+              ))
+            ) : spec.scope_confirmed ? (
+              <span className="text-[13px] text-muted-foreground">
+                no conditions — runs on every matching conversation, as you specified
+              </span>
+            ) : scopeAssumption ? (
+              <ScopeAssumed
+                onAnswer={onAnswer}
+                disabled={disabled || !isLatest || applied}
+              />
+            ) : (
+              <Hole hint="everything, or a subset?" />
+            )}
+          </Row>
+
+          <Row k="THEN">
+            {spec.actions.length ? (
+              spec.actions.map((a, i) => (
+                <span key={i} className="inline-flex flex-wrap items-baseline gap-1.5">
+                  <span className="font-mono text-[11px] text-muted-foreground">{i + 1}.</span>
+                  <ActionLine a={a} />
+                </span>
+              ))
+            ) : (
+              <Hole hint="what should happen?" />
+            )}
+          </Row>
+
+          <Row k="ENABLED FOR">
+            {spec.enabled_inboxes && spec.enabled_inboxes.length ? (
+              <span className="text-[13px] font-medium">{spec.enabled_inboxes.join(", ")}</span>
+            ) : (
+              <Hole hint="which shared inbox(es)?" />
+            )}
+          </Row>
+
+          {(turn.resolutions.filter((r) => r.value.toLowerCase() !== r.canonical.toLowerCase())
+            .length > 0 ||
+            turn.entity_notes.length > 0) && (
+            <div className="my-4 flex flex-col gap-1.5 border-l-2 border-hairline pl-3">
+              {turn.resolutions
+                .filter((r) => r.value.toLowerCase() !== r.canonical.toLowerCase())
+                .map((r, i) => (
+                  <p key={i} className="text-[12px] text-ink-soft">
+                    <span className="font-medium text-ink">matched</span>{" "}
+                    &lsquo;{r.value}&rsquo; → {r.detail ?? r.canonical}
+                  </p>
                 ))}
-              </span>
-            ))
-          ) : spec.scope_confirmed ? (
-            <span className="text-[13px] text-muted-foreground">
-              no conditions — runs on every matching conversation, as you specified
-            </span>
-          ) : scopeAssumption ? (
-            <ScopeAssumed
-              onAnswer={onAnswer}
-              disabled={disabled || !isLatest || applied}
-            />
-          ) : (
-            <Hole hint="everything, or a subset?" />
-          )}
-        </Row>
-
-        <Row k="THEN">
-          {spec.actions.length ? (
-            spec.actions.map((a, i) => (
-              <span key={i} className="inline-flex flex-wrap items-baseline gap-1.5">
-                <span className="font-mono text-[11px] text-muted-foreground">{i + 1}.</span>
-                <ActionLine a={a} />
-              </span>
-            ))
-          ) : (
-            <Hole hint="what should happen?" />
-          )}
-        </Row>
-
-        <Row k="ENABLED FOR">
-          {spec.enabled_inboxes && spec.enabled_inboxes.length ? (
-            <span className="text-[13px] font-medium">{spec.enabled_inboxes.join(", ")}</span>
-          ) : (
-            <Hole hint="which shared inbox(es)?" />
-          )}
-        </Row>
-
-        {(turn.resolutions.filter((r) => r.value.toLowerCase() !== r.canonical.toLowerCase())
-          .length > 0 ||
-          turn.entity_notes.length > 0) && (
-          <div className="my-4 flex flex-col gap-1.5 border-l-2 border-hairline pl-3">
-            {turn.resolutions
-              .filter((r) => r.value.toLowerCase() !== r.canonical.toLowerCase())
-              .map((r, i) => (
+              {turn.entity_notes.map((n, i) => (
                 <p key={i} className="text-[12px] text-ink-soft">
-                  <span className="font-medium text-ink">matched</span>{" "}
-                  &lsquo;{r.value}&rsquo; → {r.detail ?? r.canonical}
+                  {n}
                 </p>
               ))}
-            {turn.entity_notes.map((n, i) => (
-              <p key={i} className="text-[12px] text-ink-soft">
-                {n}
-              </p>
-            ))}
 
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {turn.rule != null && (
         <div className="border-t border-hairline">
