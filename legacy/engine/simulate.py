@@ -1,4 +1,12 @@
-"""Multi-turn self-play simulation for the v2 copilot.
+"""ARCHIVED (2026-08-27, App Activation charter): entirely tied to
+legacy/eval/real-world-eval-set.jsonl (pure-Hiver prod rules, no app action
+in any of them) — this engine is App Activation only now. Kept for
+reference, not run from this location; it imports copilot/router as
+siblings (now in engine/, not legacy/engine/) and eval/grader (now in
+legacy/eval/, not eval/) — both paths in this file need updating to run it
+again.
+
+Multi-turn self-play simulation for the v2 copilot.
 
 Three roles per episode:
   simulator (gpt-4o)  — plays the admin. Knows the ground-truth automation (a real

@@ -1,97 +1,28 @@
-"""Validator/schema self-test.
+"""Validator/schema self-test: the failure modes this engine exists to kill
+(VIP hallucination, missing tag, unnamed scope, illegal combos, unsupported
+asks). automation/validator.py is shared machinery — every app automation
+still needs its trigger/conditions/entity-resolution/provenance checked the
+same way a generic rule would, copilot.py's own "needs an app action" gate
+(see test_app_scope.py) sits on TOP of this, not instead of it.
 
-1. Schema coverage: every core-scope eval record's ideal_output, converted to a v2
-   spec and validated against its own user_query, must come back "complete" —
-   proving the schema covers real prod rules and provenance accepts real queries.
-2. Unit cases: the failure modes v2 exists to kill (VIP hallucination, missing tag,
-   unnamed scope, illegal combos, unsupported asks).
+App Activation only (2026-08-27 cleanup): this file used to also run a
+"schema coverage" pass against eval/real-world-eval-set.jsonl (105 pure-Hiver
+prod records with no app action in them at all) to prove the schema covered
+real prod rules generically. That eval set moved to legacy/eval/ along with
+the rest of the pre-Apps-Activation material (see legacy/README.md) — this
+file's job now is proving the SHARED mechanics below are correct, not
+re-validating an eval set this engine no longer targets.
 
 Run: python3 test_validator.py
 """
-import json
 import sys
-from pathlib import Path
 
 from automation import validator
 import workspace as wsmod
 
-EVAL_SET = Path(__file__).parent.parent / "eval" / "real-world-eval-set.jsonl"
-
-
-def prod_to_spec(ideal):
-    """Convert an eval ideal_output (prod dump shape) to a v2 spec."""
-    actions = []
-    for a in ideal["actions"]:
-        t = a["type"]
-        if t == "add_tag" or t == "remove_tag":
-            actions.append({"type": t, "tags": a.get("tags", [])})
-        elif t == "assign":
-            actions.append({"type": "assign", "target": a.get("target")})
-        elif t == "assign_among":
-            actions.append({"type": "assign_among", "targets": a.get("targets", [])})
-        elif t == "status":
-            actions.append({"type": "status", "status_value": a.get("status")})
-        elif t == "add_note":
-            actions.append({"type": "add_note", "content": a.get("content"),
-                            "pinned": a.get("pinned", False)})
-        elif t == "send_mail":
-            actions.append({"type": "send_mail", "body_hint": "saved template"})
-        elif t == "send_notification":
-            actions.append({"type": "send_notification",
-                            "email_enabled": bool((a.get("detail") or {}).get("isSendMailEnabled"))})
-        elif t in ("add_to_sm", "remove_from_sm"):
-            actions.append({"type": t, "inbox": "named in query"})
-        else:
-            actions.append({"type": t})
-    groups = [[{"property": c["property"], "op": c["op"], "values": c.get("values", []),
-                "variable": (c.get("ai_variable") or {}).get("name")}
-               for c in g] for g in ideal["condition_groups"]]
-    ai_extract = None
-    if ideal.get("ai_extract"):
-        ai_extract = {"variables": [
-            {"name": v["name"], "type": v["type"],
-             "description": v.get("description", ""), "options": v.get("options") or []}
-            for v in ideal["ai_extract"]["variables"]]}
-    return {"trigger": ideal["trigger"], "scope_confirmed": True,
-            "condition_groups": groups, "actions": actions,
-            "ai_extract": ai_extract, "unsupported_requests": []}
-
 
 def run():
     fails = 0
-
-    # ---- 1. schema coverage: core-scope records + the AI slice (uses_ai without
-    #         still-unsupported features)
-    records = list(map(json.loads, open(EVAL_SET)))
-    OUT_OF_SCOPE = {"uses_custom_field", "uses_connector", "uses_custom_object"}
-    core = [r for r in records
-            if not r["scope_flags"]
-            or ("uses_ai" in r["scope_flags"]
-                and not OUT_OF_SCOPE & set(r["scope_flags"]))]
-    for r in core:
-        spec = prod_to_spec(r["ideal_output"])
-        res = validator.validate(spec, r["user_query"])
-        if r["id"] == "rw-056":
-            # documented source wart (see the record's notes): the real admin's note
-            # template references {{urgency_label}} but the variable is urgency_level.
-            # The validator MUST flag it — a copilot may never emit a dangling ref.
-            if not any("undefined AI variable" in e for e in res["errors"]):
-                fails += 1
-                print(f"COVERAGE FAIL {r['id']}: admin's dangling "
-                      "{{urgency_label}} ref not caught")
-            continue
-        if res["status"] != "complete":
-            fails += 1
-            print(f"COVERAGE FAIL {r['id']}: {res['status']}")
-            for e in res["errors"]:
-                print("   error:", e)
-            for m in res["missing"]:
-                print("   missing:", m["slot"])
-            for h in res["hallucinated"]:
-                print("   hallucinated:", h["slot"], "=", h["value"][:60])
-    print(f"schema coverage: {len(core) - fails}/{len(core)} core eval records complete")
-
-    # ---- 2. unit cases
     units = 0
 
     def check(name, cond):

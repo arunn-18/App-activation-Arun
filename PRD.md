@@ -1,6 +1,6 @@
 # PRD — Apps Activation: an app-agnostic capability engine
 
-**Status:** Implemented (v2.18) · **Owner:** Arun Nayak · **Last updated:** 2026-08-26
+**Status:** Implemented (v2.20) · **Owner:** Arun Nayak · **Last updated:** 2026-08-27
 **Related:** [PR #1](https://github.com/arunn-18/App-activation-Arun/pull/1) · `engine/README.md` (dev changelog)
 
 ---
@@ -121,16 +121,17 @@ All new capabilities ship with a pure-code, no-LLM test suite (routing/extractio
 
 | Suite | Coverage | Result |
 |---|---|---|
-| `test_validator.py` | automation schema/validator core, incl. `enabled_inboxes`, ClickUp's ask-before-showing scope override | 56/56 core + 67/67 units |
+| `test_validator.py` | automation schema/validator core (SHARED mechanics — provenance, entity resolution, coherence — every app automation still needs), incl. `enabled_inboxes`, ClickUp's ask-before-showing scope override | 73/73 units |
 | `test_connector.py` | recipe-based connector, incl. `connect_requested` | 29/29 |
 | `test_connector_planner.py` | dynamic-plan guardrails | 18/18 |
 | `test_track_a.py` | full app-setup flow incl. write usecase | 45/45 |
 | `test_native_action.py` | native-action mechanism (ClickUp), 6-field form, app-scoped vocab, ask-before-showing scope block | 28/28 |
 | `test_mapping_explanation.py` | step-3 explanation, all mechanisms, app-aware wording (not hardcoded to Salesforce) | 9/9 |
 | `test_real_conversation.py` | step-7 real-conversation testing incl. ClickUp write feature, Prefill Fields/Quick Access (steps 5/6), mailbox-scoped + contact-match-optional `testable_conversations()` | 35/35 |
-| `test_feature_request_offer.py` | Discovery's feature-request offer, self-serve remediation, example-phrasing wiring, capability-question suppression + app-scoped badges/prose | 26/26 |
+| `test_feature_request_offer.py` | Discovery's feature-request offer, self-serve remediation, example-phrasing wiring, capability-question suppression + app-scoped badges/prose, docent dedup/keyword fixes, wholly-unmappable question suppression | 36/36 |
+| `test_app_scope.py` | the App Activation charter itself (v2.20) — an automation needs a real app action to be in scope | 12/12 |
 
-No regression to any pre-existing assertion across the whole body of work. UI (`ui/lib/api.ts`, `RuleCard.tsx`, `FeatureCard.tsx`, `CapabilityBadges.tsx`) kept in lockstep, `npx tsc --noEmit` clean.
+No regression to any pre-existing assertion across the whole body of work (285 unit cases total across 9 suites). UI (`ui/lib/api.ts`, `RuleCard.tsx`, `FeatureCard.tsx`, `CapabilityBadges.tsx`) kept in lockstep, `npx tsc --noEmit` and `next build` clean. `test_validator.py`'s former "schema coverage" pass (against the general `real-world-eval-set.jsonl`) was removed, not just left stale — that eval set moved to `legacy/eval/` along with the rest of the pre-App-Activation material (see §10c).
 
 Also a golden eval set, `eval/apps-eval-set.jsonl` (12 records, graded by a small parallel harness — `apps_grader.py`/`apps_report.py`) — the first eval coverage for Track A ("Apps" panel) capabilities and the router boundary between Track A/B, not just Track B automations. See `eval/README.md`'s own "Apps set" section.
 
@@ -164,6 +165,44 @@ All five were scoped narrowly (ClickUp only, or the one feature/action
 that needed it) rather than generalized speculatively — Salesforce's
 existing capabilities are untouched by this pass.
 
+## 10b. Docent's irrelevant/repeated answers and a trigger-vocabulary gap (v2.19, 2026-08-27)
+
+A live conversation surfaced three problems: (1) a real keyword-matching
+bug in `docent.py` — plain substring matching meant short keys matched
+inside unrelated words ("ai" inside "explain", "tag" inside "advantage"),
+producing genuinely irrelevant answers, not just unhelpfully generic ones
+— fixed with leading-word-boundary matching; (2) the same generic answer
+could render twice in a row (a bare "yes" misclassified as another
+capability question) — fixed with a dedup check; (3) an ask needing a
+trigger this engine has no vocabulary for at all (a third-party app's own
+state change, e.g. "when the linked ClickUp task closes") was silently
+built into a wrong partial rule instead of being named as impossible —
+fixed with a new extraction rule, plus stripping the resulting bogus
+WHEN/IF/THEN questions once nothing legal survives. Full writeup:
+`engine/README.md`'s v2.19 entry.
+
+## 10c. App Activation only: narrow the engine's whole charter (v2.20, 2026-08-27)
+
+The ask: "clean the code and make it according to the App's usecase only
+(including app automations)... not any automations without the app
+actions." This directly hardens Goal 2 and the capability catalogue (§5)
+above into an enforced boundary, not just a description of what's built:
+`copilot.py` now rejects (status `invalid`, a clear message) any
+automation-track turn with real content but zero connector actions among
+its actions — Hiver itself can build a pure-tag/assign/status rule fine,
+it's just no longer something THIS engine builds. Generic actions
+(tag/assign/status/note/reply/notify/inbox-move) still combine freely
+with a real app action in the same rule — the boundary is "does this rule
+touch an app at all," not "is every action app-specific."
+
+Everything from the engine's broader, pre-App-Activation scope — the
+general Automations panel and its own eval sets (real-world/multi-turn/
+entity/adversarial), historical product-process docs — moved to
+`legacy/` rather than being deleted; see `legacy/README.md` for the full
+map and `README.md` (repo root, rewritten from scratch in this pass) for
+the current schema-first structure. Full writeup: `engine/README.md`'s
+v2.20 entry.
+
 ## 11. Open questions
 
 - What does "minimal config" look like for an app whose API needs OAuth scopes beyond a single connect toggle?
@@ -177,88 +216,12 @@ existing capabilities are untouched by this pass.
 
 ## 12. Architecture reference
 
-```
-engine/
-├── router.py                    # 1st call each turn: classifies track (automation | app_setup)
-│                                   before either package's schema loads
-│
-├── app_catalog.py                # THE single per-app object/field catalog: one entry per
-│                                   app/object/field (view/write/custom/assignable/taggable flags).
-│                                   Both packages below DERIVE their schemas from this — onboarding
-│                                   a new app's objects/fields means editing only this file.
-│
-├── automation/                  # Track B: per-conversation rules (trigger → conditions → actions),
-│   │                             including connector recipes AND dynamic connector plans
-│   ├── __init__.py
-│   ├── schema.py                 # triggers, conditions, actions, RECIPES, NATIVE_ACTIONS
-│   │                                (capability 5, e.g. ClickUp task creation), UNSUPPORTED
-│   ├── extract.py                 # 2nd LLM call — fills automation-only wire schema; routes to
-│   │                                recipe | native_action_id | custom_plan | unsupported
-│   ├── planner.py                 # read-only schema-exploration tool calls (list_objects,
-│   │                                describe_object) feeding a model-composed custom_plan
-│   ├── plan_validator.py          # guardrails for a model-composed plan: real object/field
-│   │                                refs only, no forward references, assignable/taggable-only
-│   │                                terminals, MAX_PLAN_STEPS, no benefit of the doubt vs. RECIPES
-│   ├── validator.py               # pure code: provenance, entity resolution, question planning —
-│   │                                4-way connector branch (recipe / native / plan / neither)
-│   └── executor.py                # runs a recipe's chain, a validated plan's chain, OR a native
-│                                     action for real (against mocks) — run_chain() / run_native_action()
-│
-├── apps/                        # Track A: configuring an existing app feature (no trigger/actions)
-│   ├── __init__.py
-│   ├── schema.py                  # FEATURES (with "kind": "view"|"write" — capability 4),
-│   │                                 FIELD_CATALOG/WRITABLE_FIELD_CATALOG derived from app_catalog.py
-│   ├── extract.py                  # 2nd LLM call — fills app-setup-only wire schema
-│   └── setup.py                    # pure code: resolve_setup() — auth → objects → fields → inboxes;
-│                                      preview_feature() (capability 7, real-data test preview)
-│
-├── connected_apps.py             # SHARED: prerequisite/connection state + api_version() pin
-│                                    (both tracks read it; covers salesforce AND clickup);
-│                                    PREREQUISITE_REMEDIATION/remediation_for() — self-serve
-│                                    fix-it text for a gate with no one-click PREREQUISITE_ACTIONS
-├── connected_apps.json           # demo fixture (starts disconnected; per-app api_version)
-├── feature_requests.py            # Discovery's "log this as a feature request?" -- in-memory,
-│                                     deduped-by-(app,request) log; no real ClickUp/Jira destination yet
-├── analytics.py                   # in-memory analytics event log; EVENTS names all 6 Amplitude
-│                                     events the Apps Activation PRD specifies, only 1 wired so far
-├── salesforce_mock.py            # SHARED: mock Salesforce API — query()/describe_object()/
-│                                    list_objects() primitives + describe_fields()/describe_writable_fields()
-├── salesforce_schema.py          # Track B's object/field vocabulary — DERIVED from app_catalog.py
-├── salesforce_fixture.json       # contacts/accounts/account_team/opportunities/cases
-│
-├── clickup_mock.py                # second real app's mock service (create_task), proving
-│                                     "onboard with config, not code"
-│
-├── mailbox_lookup.py              # capability 7: cross-references mailbox.json against an
-│                                     app's fixture contacts to offer REAL testable conversations
-│
-├── copilot.py                     # outer turn loop: router → (automation | apps) → render;
-│                                     _mapping_explanation() (step 3, first-turn-only);
-│                                     _render_feature_preview()/_test_conversation_suggestions()
-├── docent.py                      # capability-question answers — describes all 3 connector
-│                                     mechanisms (recipe / native action / composed plan)
-├── workspace.py / workspace.json  # entity-resolution fixture (tags/agents/inboxes)
-├── preview.py                     # dry-run a final rule JSON over the mailbox fixture
-│
-├── serve2.py                      # Automations-panel dev server (port 8001)
-├── serve_api.py                   # structured JSON API for the UI (port 8010)
-├── serve_apps.py                  # Apps-panel dev server — also returns native_actions per app
-├── cli.py                         # eval CLI (stdin → stdout)
-├── simulate.py                    # multi-turn self-play simulation harness
-├── make_mailbox.py / mailbox.json # demo inbox fixture
-│
-├── test_validator.py              # automation schema/validator suite — 56/56 core, 67/67 units
-├── test_connector.py              # connector recipe suite — 29/29
-├── test_connector_planner.py      # dynamic-plan guardrail suite — 18/18
-├── test_track_a.py                # app-setup flow suite — 45/45 (write-usecase branch, 2 apps)
-├── test_native_action.py          # ClickUp native-action suite — 28/28 (6 fields, one-block form,
-│                                     ask-before-showing scope block)
-├── test_mapping_explanation.py    # step-3 explanation suite — 9/9 (app-aware wording)
-├── test_real_conversation.py      # capability 7 suite — 35/35 (2 apps' write features, Prefill
-│                                     Fields/Quick Access, mailbox-scoped conversation picker)
-├── test_feature_request_offer.py  # Discovery/remediation/example-phrasing suite — 26/26
-└── README.md                      # dev changelog (through the v2.18 ClickUp UX-clarity entry)
-```
+Moved to the repo root `README.md` (rewritten from scratch in v2.20) —
+keeping one accurate tree instead of two that drift out of sync. That
+file is schema-first: it points at `apps/schema.py`, `automation/
+schema.py`, and `app_catalog.py` as the actual place to start reading,
+then the full current directory structure (`engine/`, `eval/`, `ui/`,
+`legacy/`), how to run everything, and the known gaps.
 
 ---
 

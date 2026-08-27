@@ -1,3 +1,7 @@
+// ARCHIVED (2026-08-27, App Activation charter): the general Automations
+// panel's own local telemetry — see legacy/ui/app/page.tsx's note. Kept
+// for reference, not wired into the active build.
+//
 // Local accept / edit / abandon telemetry for generated rules — the prototype of
 // the pilot's "session completion" and "generation quality" metrics. Stored in
 // localStorage only; nothing leaves the browser.

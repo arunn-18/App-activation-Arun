@@ -285,6 +285,7 @@ export default function AppsPanel() {
                       onApply={apply}
                       onAnswer={send}
                       disabled={busy}
+                      app={selectedApp}
                     />
                   )}
                   {m.role === "assistant" &&

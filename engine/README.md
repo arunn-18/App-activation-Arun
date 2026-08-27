@@ -992,6 +992,114 @@ override, steps 5/6, and the mailbox/contact-match scoping). `eval/apps-
 eval-set.jsonl`'s router-boundary records (apps-008/009/010) updated to
 the new chip text. `npx tsc --noEmit` clean. `ui/api/_engine` re-vendored.
 
+## Fix docent's irrelevant/repeated answers and a trigger-vocabulary gap (v2.19, 2026-08-27)
+
+A live conversation surfaced three problems together. First, a meta-
+question ("will you ask clarifying questions and suggest features if I
+explain my workflow?") got docent's generic capability dump verbatim, then
+the SAME dump again after a bare "yes" — a broken record, not two real
+answers. Investigating turned up a real bug, not a hypothetical one:
+`docent.py`'s keyword matching was plain substring, so short keys matched
+inside unrelated words — "ai" inside "expl**ai**n", "tag" inside
+"advan**tag**e", "move" inside "re**move**", "api" inside "c**api**tal".
+Fixed with leading-word-boundary matching (`_kw_match()`), which keeps
+every intentional stem match ("assign" -> "assignment", "trigger" ->
+"triggers") while killing the false positives. Also added
+`copilot._dedup_capability_answer()` (the identical answer never renders
+twice in a row) and rewrote the generic overview's opening line to
+directly answer "will you help me" style questions.
+
+Second, "change the status of the hiver conversation when the clickup
+task linked to it closed" silently built a partial rule instead of
+recognizing the trigger itself (a third-party app's own state change) as
+something this engine has no vocabulary for at all — it only reacts to
+Hiver conversation events, never another app's own events. Fixed with a
+new extraction rule (automation/extract.py rule 4c): record the whole
+dependent requirement in `unmappable`, never substitute a Hiver-side
+trigger as a stand-in.
+
+Third, once that fix landed, the RuleCard still showed blank WHEN/IF/THEN
+placeholders and kept asking "when should this run?" for an ask that
+depended ENTIRELY on that one impossible trigger — nothing legal survived
+at all. Fixed in `copilot.py` (strip questions_structured down to just the
+feature-request offer when unmappable is non-empty and nothing else was
+extracted) and `RuleCard.tsx` (skip the WHEN/IF/THEN rows entirely in that
+shape, badge reads "Not supported"). A genuinely separate real automation
+in the same message is unaffected — this only fires when NOTHING legal
+survives.
+
+Full 8-suite regression + `npx tsc --noEmit` clean; `ui/api/_engine`
+re-vendored.
+
+## App Activation only: narrow the engine's whole charter (v2.20, 2026-08-27)
+
+The ask: "clean the code and make it according to the App's usecase only
+(including app automations)... not any automations without the app
+actions" — a developer reading the schema should understand the engine's
+structure without wading through the general (non-app-connected)
+automation surface this repo started from. Scoped via clarifying
+questions before touching anything (generic actions may still COMBINE
+with an app action in the same rule; the general Automations panel and
+its eval sets move to `legacy/`, not deleted; nothing is destroyed —
+`git mv` throughout, every archived file gets a note on why it moved and
+what to adjust to run it again).
+
+- **`copilot.py`**: new scope gate — an automation-track turn with real
+  content (actions/trigger/conditions) but ZERO connector actions among
+  `spec.actions` gets `status: "invalid"` with a distinct, honest message
+  ("this only builds automations connected to a real app"). This is NOT
+  `unmappable` (Hiver itself can build a pure-tag/assign/status rule fine
+  — it's just out of scope for this engine now, nothing is missing from
+  the catalogue). New `test_app_scope.py` (12 cases) locks in: pure-Hiver
+  asks blocked, app-connected asks unaffected, generic-actions-ALONGSIDE-
+  an-app-action unaffected (that's exactly what this engine is for), the
+  gate waits until actions are actually extracted (never guesses ahead),
+  read-only turns (capability questions, gibberish) untouched, and the
+  separate wholly-unmappable gate (v2.19) doesn't fight this one.
+- **`docent.py`**: the generic overview and module docstring now lead
+  with the app-usecase framing — generic actions are described as things
+  you COMBINE with an app action, not standalone offerings.
+- **`test_validator.py`**: dropped the "schema coverage" pass against
+  `real-world-eval-set.jsonl` (105 pure-Hiver prod records, now in
+  `legacy/eval/`) — the file's remaining 73 unit cases test the SHARED
+  validator mechanics (provenance, entity resolution, coherence) every
+  app automation still needs, unchanged.
+- **Moved to `legacy/`** (see `legacy/README.md`): `engine/serve2.py`,
+  `serve_api.py`, `simulate.py` (the general panel's dev servers + self-
+  play harness — `cli.py`/`run_eval.py`/`grader.py`/`report.py` stayed,
+  still needed by `connector-eval-set.jsonl`); `real-world-eval-set.jsonl`,
+  `multi-turn-eval-set.jsonl`, `entity-eval-set.jsonl`,
+  `adversarial-eval-set.jsonl`, `coverage-2026-08-09.md`, `build/`,
+  `runs/` (139 historical run files); `ui/app/page.tsx` (the "/" route),
+  `ui/lib/sessions.ts`/`telemetry.ts`/`api-automations.ts`,
+  `ui/components/StreamedText.tsx`/`WorkingSteps.tsx`; six historical
+  top-level product-process docs.
+- **`serve_apps.py`** gained its own `POST /api/apps/<app>/preview` (the
+  SAME `preview.preview()` dry-run the now-archived general panel's
+  `/api/preview` offered) — `RuleCard.tsx`'s blast-radius strip is a
+  SHARED component the Apps panel also renders, and would otherwise have
+  silently lost its preview once `serve_api.py` stopped running.
+  `ui/lib/api.ts` trimmed to what the Apps panel and shared components
+  actually use; "/" now redirects to "/apps".
+- **`eval/grader.py`/`report.py`/`run_eval.py`** repointed their default
+  eval set to `connector-eval-set.jsonl` (was `real-world-eval-set.jsonl`)
+  and `run_eval.py`'s `--scope` default changed from "core" to "all" (the
+  old "core = no flags" curation excluded `uses_connector` records — the
+  entire point of the connector set).
+- **Top-level `README.md`** rewritten from scratch — it had described a
+  pre-v2.10 architecture (before automation/ and apps/ even split into
+  packages) for a long time. Now schema-first: points at
+  `apps/schema.py`/`automation/schema.py`/`app_catalog.py` as the actual
+  starting point, an accurate current directory tree, and a "Known gaps"
+  section flagging that `ui/api/*.py` (the Vercel serverless functions)
+  still serve the archived general panel's endpoints with nothing in the
+  active UI calling them — real follow-on work, not silently swept under.
+
+Full 8-suite regression (all pass) + `test_app_scope.py` (12/12) +
+`eval/grader.py --self-test` + `eval/run_eval.py --engine echo` (both
+against `connector-eval-set.jsonl`) + `npx tsc --noEmit` + `next build`
+all clean; `ui/api/_engine` re-vendored.
+
 ## Next
 
 - **Multi-rule sessions** (the real fix behind the coherence questions): the session

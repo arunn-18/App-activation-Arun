@@ -354,24 +354,27 @@ function TestRunSteps({ steps }: { steps: ConnectorTestRunStep[] }) {
  *  mail. "All 189 of 189" makes an everything-scope viscerally checkable;
  *  a subset shows its real count plus example matches. Honest when it can't
  *  run (AI conditions, time windows): states why, never approximates. */
-function PreviewStrip({ rule }: { rule: object }) {
+function PreviewStrip({ rule, app }: { rule: object; app?: string }) {
   const [pv, setPv] = useState<RulePreview | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const key = JSON.stringify(rule);
 
   useEffect(() => {
+    if (!app) return; // no app selected -> nothing to preview against
     let live = true;
     setPv(null);
     setFailed(false);
-    fetchPreview(JSON.parse(key)).then(
+    fetchPreview(app, JSON.parse(key)).then(
       (r) => live && setPv(r),
       () => live && setFailed(true)
     );
     return () => {
       live = false;
     };
-  }, [key]);
+  }, [key, app]);
+
+  if (!app) return null;
 
   if (failed) return null; // preview is an enhancement, never a blocker
   if (!pv)
@@ -464,6 +467,7 @@ export default function RuleCard({
   vocab,
   onAnswer,
   disabled,
+  app,
 }: {
   turn: TurnState;
   isLatest: boolean;
@@ -472,6 +476,11 @@ export default function RuleCard({
   vocab?: Vocabulary;
   onAnswer?: (text: string) => void;
   disabled?: boolean;
+  /** which app's preview endpoint to hit (serve_apps.py's own /preview) —
+   *  omitted entirely on a page that doesn't have one selected, same
+   *  "don't offer what isn't there" stance as fetchTestConversations
+   *  elsewhere; the blast-radius strip just doesn't render then. */
+  app?: string;
 }) {
   const [showJson, setShowJson] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -665,7 +674,7 @@ export default function RuleCard({
       {turn.rule != null && (
         <div className="border-t border-hairline">
           {turn.test_run && <TestRunStrip testRun={turn.test_run} />}
-          {isLatest && !applied && <PreviewStrip rule={turn.rule} />}
+          {isLatest && !applied && <PreviewStrip rule={turn.rule} app={app} />}
           {!isLatest ? null : applied ? (
             <div className="flex items-center justify-between bg-bone px-5 py-3">
               <span className="text-[13px] font-medium text-ink">

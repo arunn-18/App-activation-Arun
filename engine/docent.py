@@ -7,11 +7,16 @@ schema.py, so every capability named is one the engine can actually build, and
 what's out of scope is stated from the UNSUPPORTED list rather than omitted or
 invented. Question turns are read-only: the draft rule is not touched.
 
-Lane line: automation vocabulary (triggers, conditions, actions, AI variables,
-limits), PLUS Track A app features (apps/schema.py's FEATURES) wherever a
-topic names an app — "what's possible with Salesforce" spans BOTH tracks
-(view/manage records AND connector automations), so the answer must too, or
-half of what's actually built goes unmentioned. Anything else gets an honest
+App Activation only (2026-08-27 charter): this engine's whole job is
+connecting Hiver to your apps — Track A app features (apps/schema.py's
+FEATURES) and Track B app automations (a trigger/conditions shell around a
+real connector action). Trigger/condition/generic-action vocabulary (tag,
+assign, status, note, reply, inbox moves) is real and answered accurately
+here, but it's SCAFFOLDING for an app automation, never the whole rule on
+its own — copilot.py's own scope gate enforces the same boundary
+downstream. "What's possible with Salesforce" spans BOTH tracks (view/
+manage records AND connector automations), so the answer must too, or half
+of what's actually built goes unmentioned. Anything else gets an honest
 redirect.
 """
 import re
@@ -41,24 +46,32 @@ def _kw_match(text, keys):
     return any(re.search(r"\b" + re.escape(k), text) for k in keys)
 
 _OVERVIEW = (
+    # App Activation only (2026-08-27 charter): this engine connects Hiver
+    # to your apps, so the overview leads with the app-usecase framing
+    # rather than reading as a generic rule-builder pitch with "talk to
+    # another app" buried as one bullet among many — copilot.py's own
+    # scope gate enforces the same thing downstream (see its own comment).
     "Describe what you want to happen, or what your workflow looks like, "
     "and I'll match it to what's actually built here — asking about "
     "anything I still need to fill in, and saying plainly if part of it "
     "isn't supported rather than guessing. Two kinds of thing I can set "
-    "up. App features — enable once per "
+    "up, both connected to a real app. App features — enable once per "
     "workspace, no trigger involved: " + "; ".join(
         f"{f['name']} ({f['app'].title()})" for f in apps_schema.FEATURES.values())
-    + ". And automations — a rule fires on one trigger (new inbound/outbound "
-    "conversations, incoming replies, outgoing email, or a conversation moved "
-    "into the inbox), filters on conditions (sender/recipient addresses and "
-    "domains, subject and body keywords, the conversation's current tags/"
-    "assignee/status, day received, or an AI-extracted variable), then runs "
-    "actions — tag or untag, assign (one person or round-robin), set status, "
-    "add a note, send a reply or notification, add to or remove from a shared "
-    "inbox, or talk to another app — a native action block (like creating a "
-    "ClickUp task), a ready-made Salesforce recipe, or a Salesforce lookup "
-    "composed on the fly for asks that fit the same shape. Ask about any of "
-    "these and I'll go deeper."
+    + ". And app automations — a rule fires on a trigger (new inbound/"
+    "outbound conversations, incoming replies, outgoing email, or a "
+    "conversation moved into the inbox), filters on conditions (sender/"
+    "recipient addresses and domains, subject and body keywords, the "
+    "conversation's current tags/assignee/status, day received, or an "
+    "AI-extracted variable), then does something in the app it's connected "
+    "to — a native action block (like creating a ClickUp task), a "
+    "ready-made Salesforce recipe, or a Salesforce lookup composed on the "
+    "fly for asks that fit the same shape. Every automation here needs at "
+    "least one of those app actions; you can ALSO tag, assign, set status, "
+    "add a note, send a reply or notification, or move the conversation "
+    "between shared inboxes in the SAME rule, but none of those alone is "
+    "something this engine builds on its own. Ask about any of these and "
+    "I'll go deeper."
 )
 
 # keyword routes -> composed answers. Every claim traces to schema.py.

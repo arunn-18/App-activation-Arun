@@ -1,3 +1,8 @@
+// ARCHIVED (2026-08-27, App Activation charter): used only by the general
+// Automations panel's streaming chat (legacy/ui/lib/api-automations.ts's
+// sendChatStream) — see legacy/ui/app/page.tsx's note. Kept for reference,
+// not wired into the active build.
+
 "use client";
 
 import { useEffect, useRef, useState } from "react";

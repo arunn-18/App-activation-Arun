@@ -770,6 +770,38 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None, app=None):
         result["questions"] = []
         result["questions_pending"] = 0
 
+    # THIS ENGINE'S CHARTER (2026-08-27 cleanup): App Activation only — every
+    # automation it builds has to touch a real app, via a connector action
+    # (recipe / native_action_id / custom_plan). A rule with real content
+    # (at least one action was actually extracted) but made up ENTIRELY of
+    # generic Hiver moves (tag, assign, status, note, reply, notify, move
+    # inbox) is a rule Hiver itself can build fine — it's just not what THIS
+    # engine is for. That is a genuinely different situation from
+    # `unmappable` (a real capability gap worth logging as a feature
+    # request): nothing is missing from the catalogue here, the ask is
+    # simply out of scope, so `errors`/status "invalid" is the honest fit,
+    # not a feature-request offer. Generic actions ALONGSIDE a real app
+    # action are unaffected — combining "tag it VIP and also create a
+    # ClickUp task" is exactly what this engine is for; only an action list
+    # with ZERO app actions in it trips this. Gated on `actions` being
+    # non-empty (not `trigger`) for the same reason every other "was
+    # anything real said yet" check in this file is: rule 4's own
+    # default-trigger fill means `trigger` alone proves nothing.
+    if (not spec.get("capability_question") and not spec.get("no_intent")
+            and (spec.get("actions") or [])
+            and not any(a.get("type") == "connector" for a in spec["actions"])):
+        result["status"] = "invalid"
+        result["errors"] = [
+            "This only builds automations connected to a real app — something "
+            "like \"create a ClickUp task when...\" or \"assign based on the "
+            "Salesforce account\". What's described here doesn't touch any "
+            "app, so it's out of scope here."
+        ]
+        result["missing"] = []
+        result["questions"] = []
+        result["questions_structured"] = []
+        result["questions_pending"] = 0
+
     # capability questions: the model only classifies (router.py); the answer
     # is composed in code from schema.py so nothing unbuildable is ever
     # taught. A question is never a closing.

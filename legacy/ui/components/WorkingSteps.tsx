@@ -1,3 +1,9 @@
+// ARCHIVED (2026-08-27, App Activation charter): used only by the general
+// Automations panel's live pipeline-progress display (legacy/ui/lib/
+// api-automations.ts's ProgressEvent/progressLabel/finalStepLabel) — see
+// legacy/ui/app/page.tsx's note. Kept for reference, not wired into the
+// active build.
+
 "use client";
 
 import { useState } from "react";

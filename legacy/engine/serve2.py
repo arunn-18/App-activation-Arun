@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""v2 copilot chat UI (schema + validator engine).
+"""ARCHIVED (2026-08-27, App Activation charter): see legacy/engine/
+serve_api.py's own note — same reasoning, this is the older plain-text UI
+for the general (non-app-scoped) Automations panel. Kept for reference,
+not run from this location; add engine/ to sys.path to run it again.
+
+v2 copilot chat UI (schema + validator engine).
 
 Run:  ../../automation-copilot/.venv/bin/python serve2.py   ->  http://127.0.0.1:8001
 """

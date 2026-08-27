@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Structured JSON API for the copilot — the surface a real UI builds on.
+"""ARCHIVED (2026-08-27, App Activation charter): this served the general
+Automations panel — building ANY Hiver automation, with or without an app
+action. This engine is App Activation only now (see engine/copilot.py's own
+scope gate and PRD.md); the Apps panel's serve_apps.py is the active
+equivalent. Kept for reference, not run from this location — it imports
+copilot/router/etc. as siblings, which now live in engine/, not
+legacy/engine/; add engine/ to sys.path (or copy this file back there) to
+run it again.
+
+Structured JSON API for the copilot — the surface a real UI builds on.
 
 Run:  ../../automation-copilot/.venv/bin/python serve_api.py   ->  http://127.0.0.1:8010
 

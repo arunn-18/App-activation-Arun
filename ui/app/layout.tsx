@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Automation Copilot — Playground",
+  title: "App Activation — Playground",
   description:
-    "Plain English in, a valid Hiver automation out. Test bench for the v2 engine.",
+    "Plain English in, a Hiver app feature or app-connected automation out. Test bench for the App Activation engine.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

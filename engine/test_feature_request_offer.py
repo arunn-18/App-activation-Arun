@@ -361,11 +361,17 @@ def run():
     # WHEN question must survive rather than being swallowed.
     def _fake_extract_partial_unmappable(client, messages, model=None, ws=None,
                                          on_event=None, app=None):
+        # a real APP action -- not a generic one -- so this exercises the
+        # unmappable-alongside-something-real path without ALSO tripping the
+        # separate "needs an app action" scope gate (test_app_scope.py) a
+        # bare generic-only action would now hit.
         return {"trigger": None, "scope_confirmed": False,
-                "condition_groups": [], "actions": [{"type": "tag", "tags": ["VIP"]}],
+                "condition_groups": [], "actions": [{"type": "connector", "recipe": None,
+                "native_action_id": "clickup_create_task", "target_name": "Support",
+                "title_hint": "Follow up", "test_contact_email": None, "custom_plan": None}],
                 "ai_extract": None, "unsupported_requests": [], "closing": False,
                 "capability_question": None, "no_intent": None,
-                "unmappable": [{"request": "trigger off the ClickUp task closing",
+                "unmappable": [{"request": "trigger off the OTHER ClickUp task closing",
                                 "why": "this engine's triggers only fire on Hiver "
                                        "conversation events"}],
                 "intent_summary": "t", "enabled_inboxes": None,
@@ -375,12 +381,14 @@ def run():
     automation_extract.extract = _fake_extract_partial_unmappable
     try:
         s8 = copilot.respond_structured(
-            None, [{"role": "user", "content": "tag VIP, and also close it when "
-                                                "the clickup task closes"}])
+            None, [{"role": "user", "content": "create a clickup task for new "
+                                                "conversations, and also close a "
+                                                "DIFFERENT one when its own clickup "
+                                                "task closes"}])
     finally:
         router.classify, automation_extract.extract = oc3, oae3
-    check("unmappable ALONGSIDE a real action -- the WHEN question for that "
-          "real action survives, unlike the wholly-unmappable case above",
+    check("unmappable ALONGSIDE a real app action -- the WHEN question for "
+          "that real action survives, unlike the wholly-unmappable case above",
           any(q["slot"] == "trigger" for q in s8["questions_structured"])
           and s8["unmappable"])
 

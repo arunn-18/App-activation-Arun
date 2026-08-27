@@ -40,6 +40,13 @@ Endpoints:
                                     "field_values": {label: value}} -> a
                                     real (mock) created record — see
                                     copilot.test_create_feature()
+  POST /api/apps/<app>/preview      RuleCard.tsx's blast-radius strip (a
+                                    SHARED component this panel also
+                                    renders) — {"rule": <final JSON>} ->
+                                    preview.preview(), same dry-run the
+                                    now-archived general Automations panel
+                                    offered; `app` is unused, present only
+                                    for routing symmetry
 
 SCOPING NOTE: /chat now threads `app` into copilot.respond_structured() ->
 automation_extract.extract(), which scopes CONNECTOR RECIPES/NATIVE APP
@@ -60,6 +67,7 @@ from urllib.parse import parse_qs
 import connected_apps
 import copilot
 import mailbox_lookup
+import preview
 import router
 import workspace as wsmod
 from apps import setup as features
@@ -74,6 +82,7 @@ FEATURE_ENABLE_PATH = re.compile(r"^/api/apps/([^/]+)/features/([^/]+)/enable$")
 CHAT_PATH = re.compile(r"^/api/apps/([^/]+)/chat$")
 TEST_CREATE_PATH = re.compile(r"^/api/apps/([^/]+)/features/([^/]+)/test-create$")
 TESTABLE_CONVERSATIONS_PATH = re.compile(r"^/api/apps/([^/]+)/testable-conversations$")
+PREVIEW_PATH = re.compile(r"^/api/apps/([^/]+)/preview$")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -202,6 +211,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, state)
             except Exception as e:
                 return self._send(500, {"error": f"{type(e).__name__}: {str(e)[:300]}"})
+        m = PREVIEW_PATH.match(self.path)
+        if m:
+            # RuleCard.tsx's blast-radius strip (PreviewStrip) — the SAME
+            # dry-run preview.preview() the general Automations panel's own
+            # /api/preview offered (now archived to legacy/, along with the
+            # panel itself). RuleCard is a SHARED component the Apps panel
+            # also renders for ClickUp automations, so it needs its own
+            # working endpoint to call rather than silently losing the
+            # feature once that panel's backend stopped running. `app` is
+            # unused here (preview.preview() works on the mailbox fixture
+            # regardless of app) — only present in the URL for routing
+            # symmetry with this file's other app-scoped endpoints.
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                req = json.loads(self.rfile.read(length) or b"{}")
+                rule = req.get("rule")
+                if not isinstance(rule, dict) or not rule.get("trigger"):
+                    return self._send(400, {"error": "rule (final JSON) required"})
+                return self._send(200, preview.preview(rule))
+            except Exception as e:
+                return self._send(500, {"error": f"{type(e).__name__}: {str(e)[:300]}"})
         return self._send(404, {"error": "not found"})
 
 
@@ -210,5 +240,6 @@ if __name__ == "__main__":
          "(GET /api/apps, GET /api/apps/<app>, POST /api/apps/<app>/chat, "
          "GET /api/apps/<app>/testable-conversations, "
          "POST /api/apps/<app>/features/<id>/enable, "
-         "POST /api/apps/<app>/features/<id>/test-create)")
+         "POST /api/apps/<app>/features/<id>/test-create, "
+         "POST /api/apps/<app>/preview)")
     ThreadingHTTPServer(("127.0.0.1", 8011), Handler).serve_forever()

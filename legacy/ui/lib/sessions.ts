@@ -1,3 +1,7 @@
+// ARCHIVED (2026-08-27, App Activation charter): the general Automations
+// panel's own session sidebar — see legacy/ui/app/page.tsx's note. Kept
+// for reference, not wired into the active build.
+//
 // Chat sessions, Amplitude-style: a sidebar of past automations, persisted in
 // localStorage. Each session carries its full transcript plus the per-turn
 // machine state so inline rule cards re-render on revisit.
