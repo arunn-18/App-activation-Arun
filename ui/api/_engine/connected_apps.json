@@ -1,0 +1,19 @@
+{
+  "connected_apps": {
+    "salesforce": {
+      "connected": false,
+      "api_version": "v58.0",
+      "prerequisites": {
+        "salesforce_connected": false,
+        "account_team_enabled": true
+      }
+    },
+    "clickup": {
+      "connected": false,
+      "api_version": "v2",
+      "prerequisites": {
+        "clickup_connected": false
+      }
+    }
+  }
+}

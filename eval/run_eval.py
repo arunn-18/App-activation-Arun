@@ -22,7 +22,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).parent
-EVAL_SET = HERE / "real-world-eval-set.jsonl"
+# App Activation (2026-08-27) narrowed this engine's scope to app-connected
+# automations only -- connector-eval-set.jsonl is the in-scope default now
+# (apps-eval-set.jsonl, Track A, has its own harness -- apps_grader.py/
+# apps_report.py). The general real-world-eval-set.jsonl moved to
+# legacy/eval/ (still runnable by passing --eval-set explicitly).
+EVAL_SET = HERE / "connector-eval-set.jsonl"
 RUNS_DIR = HERE / "runs"
 
 # Appended to the user message for --engine openai, so a prose-first prompt (v1)
@@ -84,8 +89,12 @@ ENGINES = {"echo": engine_echo, "command": engine_command, "openai": engine_open
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--engine", choices=ENGINES, required=True)
-    p.add_argument("--scope", default="core",
-                   help="core (no flags) | flagged | all | <flag name>")
+    # "core" (no flags) was the real-world set's own curation concept --
+    # meaningless noise on the small, fully-in-scope connector/apps sets
+    # (it would even EXCLUDE con-004/005, the uses_connector records that
+    # are the whole point), so "all" is the right default now.
+    p.add_argument("--scope", default="all",
+                   help="all | core (no flags) | flagged | <flag name>")
     p.add_argument("--cmd", help="shell command for --engine command")
     p.add_argument("--model", default="gpt-4o")
     p.add_argument("--temperature", type=float, default=0.2)

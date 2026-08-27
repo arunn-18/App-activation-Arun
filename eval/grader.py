@@ -1,5 +1,11 @@
-"""Grader for the real-world eval set: canonicalize rules from either vocabulary
-(raw prod schema or engine output schema) into one comparison form, then diff.
+"""Grader for the automation wire schema (trigger/condition_groups/actions):
+canonicalize rules from either vocabulary (raw prod schema or engine output
+schema) into one comparison form, then diff. Originally built for the
+general real-world eval set; App Activation (2026-08-27) narrowed this
+engine's scope to app-connected automations only, so connector-eval-set.jsonl
+is this grader's primary user now — the underlying wire schema (and so the
+canonicalize/diff logic) is unchanged either way, a connector automation is
+still a trigger/conditions/actions rule, just with a connector action in it.
 
 Tiers:
   1. validity  — did the engine emit parseable rule JSON at all (handled in report.py)
@@ -18,7 +24,7 @@ import re
 import sys
 from pathlib import Path
 
-EVAL_SET = Path(__file__).parent / "real-world-eval-set.jsonl"
+EVAL_SET = Path(__file__).parent / "connector-eval-set.jsonl"
 
 # ---------------------------------------------------------------- vocab maps
 # Left side: any alias an engine (v1 golden-set vocab, or future v2 schema) may emit.

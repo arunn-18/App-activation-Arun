@@ -20,7 +20,12 @@ from pathlib import Path
 import grader
 
 HERE = Path(__file__).parent
-EVAL_SET = HERE / "real-world-eval-set.jsonl"
+# App Activation (2026-08-27) narrowed this engine's scope to app-connected
+# automations only -- connector-eval-set.jsonl (same wire schema grader.py
+# already canonicalizes/diffs) is the in-scope default now; the general
+# real-world-eval-set.jsonl moved to legacy/eval/ (still gradable by passing
+# --eval-set explicitly if ever needed for historical comparison).
+EVAL_SET = HERE / "connector-eval-set.jsonl"
 
 
 # ------------------------------------------------------------------ parsing

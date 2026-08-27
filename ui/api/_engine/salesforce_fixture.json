@@ -1,0 +1,42 @@
+{
+  "contacts": [
+    {"contact_id": "003A1", "email": "jordan@acme.example", "account_id": "001A1",
+     "name": "Jordan Kim", "phone": "+1-555-0101", "role": "Procurement Manager"},
+    {"contact_id": "003B1", "email": "sam@globex.example", "account_id": "001B1",
+     "name": "Sam Reyes", "phone": "+1-555-0102", "role": "Operations Lead"},
+    {"contact_id": "003C1", "email": "morgan@initech.example", "account_id": "001C1",
+     "name": "Morgan Ellis", "phone": "+1-555-0103", "role": "IT Director"},
+    {"contact_id": "003D1", "email": "arunnayak.b@grexit.com", "account_id": "001D1",
+     "name": "Arun Nayak", "phone": "+1-555-0104", "role": "Account Admin"}
+  ],
+  "accounts": [
+    {"account_id": "001A1", "name": "Acme Corp", "owner_email": "marcus.lee@hiver.example"},
+    {"account_id": "001B1", "name": "Globex Inc", "owner_email": "wes.kim@hiver.example"},
+    {"account_id": "001C1", "name": "Initech LLC", "owner_email": "owner.initech@hiver.example"},
+    {"account_id": "001D1", "name": "Grexit Technologies", "owner_email": "owner.grexit@hiver.example"}
+  ],
+  "account_team": [
+    {"account_id": "001A1", "user_id": "005A1", "name": "Priya Shah",
+     "email": "priya.shah@hiver.example", "role": "CSM"},
+    {"account_id": "001A1", "user_id": "005A2", "name": "Marcus Lee",
+     "email": "marcus.lee@hiver.example", "role": "AE"},
+    {"account_id": "001B1", "user_id": "005B1", "name": "Wes Kim",
+     "email": "wes.kim@hiver.example", "role": "AE"},
+    {"account_id": "001C1", "user_id": "005C1", "name": "Dee Osei",
+     "email": "dee.osei@hiver.example", "role": "CSM"},
+    {"account_id": "001D1", "user_id": "005D1", "name": "Ava Chen",
+     "email": "ava.chen@hiver.example", "role": "CSM"}
+  ],
+  "opportunities": [
+    {"opportunity_id": "006A1", "account_id": "001A1", "name": "Acme Renewal Q3",
+     "stage": "Negotiation", "amount": 50000, "owner_email": "marcus.lee@hiver.example"},
+    {"opportunity_id": "006B1", "account_id": "001B1", "name": "Globex Expansion",
+     "stage": "Closed Won", "amount": 120000, "owner_email": "wes.kim@hiver.example"}
+  ],
+  "cases": [
+    {"case_id": "500A1", "account_id": "001A1", "subject": "Acme - login issue",
+     "priority": "High", "status": "Open", "owner_email": "marcus.lee@hiver.example"},
+    {"case_id": "500D1", "account_id": "001D1", "subject": "Grexit - billing question",
+     "priority": "Medium", "status": "Open", "owner_email": "owner.grexit@hiver.example"}
+  ]
+}

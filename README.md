@@ -1,185 +1,229 @@
-# Automation Copilot v2
+# App Activation
 
-An AI assistant that turns plain-English requests into [Hiver](https://hiverhq.com) automation
-rules (trigger → conditions → actions) — built as a learning project, rebuilt from scratch
-around one idea:
+An engine that turns plain-English requests into either an existing Hiver
+**app feature** (Track A — enable once per workspace, no trigger) or a
+**Hiver automation connected to a real app** (Track B — a trigger +
+conditions shell around a connector action). Built around one idea carried
+over from the general automation-copilot project this engine grew out of:
 
 > **The model only extracts. The code decides.**
 
-v1 was a single prompt asked to understand, validate, clarify, and answer all at once. It
-worked until it didn't: given a vague request, it would eventually **invent** a tag name or
-assignee (usually leaked from its own few-shot examples), and three rounds of increasingly
-stern prompt rules could not stop it. v2 splits the job so that failure is structurally
-impossible: an LLM fills out a strict form, and a deterministic validator — not the model —
-decides what's legal, what's missing, what to ask, and when the rule is done.
+An LLM fills out a strict form; a deterministic validator — never the
+model — decides what's legal, what's missing, what to ask, and when a
+feature or rule is done.
 
-## What's in this repo
+## Charter (2026-08-27): App Activation only
+
+Every automation this engine builds now has to touch a real app via a
+connector action (a native action block, a hand-vetted recipe, or a
+composed lookup) — see `engine/copilot.py`'s own scope gate
+(`test_app_scope.py` locks it in). Generic Hiver actions (tag, assign,
+status, note, reply, notify, move inbox) are still real and still combine
+with an app action in the same rule, but none of them is something this
+engine builds on its own anymore. This repo's earlier, broader scope — any
+Hiver automation, with or without an app action — moved to `legacy/`; see
+`legacy/README.md` for what's there and why.
+
+## Start here: the schema
+
+The fastest way to understand what this engine can build is to read the
+two schema files directly — every capability traces back to one of these,
+and nothing here is invented by the model:
+
+- **`engine/apps/schema.py`** — `FEATURES`: Track A capabilities (an
+  existing app feature an admin enables once per workspace — view or
+  write a record, no trigger involved).
+- **`engine/automation/schema.py`** — `TRIGGERS`/`CONDITION_PROPERTIES`/
+  `ACTIONS` (the generic rule-building vocabulary) plus `RECIPES` and
+  `NATIVE_ACTIONS` (the two hand-vetted connector mechanisms) — see
+  `ACTIONS["connector"]`'s own comment for the third, model-composed
+  mechanism (`custom_plan`, validated by `automation/plan_validator.py`).
+- **`engine/app_catalog.py`** — the single per-app object/field catalog
+  BOTH schemas above derive from; onboarding a new app's objects/fields
+  means editing only this file.
+
+`PRD.md` covers the product framing (capability catalogue, guardrails,
+open questions) in more depth; `engine/README.md` is the dev changelog
+(every phase, in order, including the live-testing bugs each one fixed).
+
+## Repo structure
 
 ```
-├── engine/            the v2 copilot
-│   ├── schema.py         legal vocabulary: 7 triggers, 16 condition properties (+ per-
-│   │                     property operators, incl. ai_variable), 7 AI variable types,
-│   │                     10 actions (+ required params). Grounded in a 90-day dump of
-│   │                     real production automations.
-│   ├── extract.py        the only LLM call: conversation -> partial rule spec (strict
-│   │                     structured output; unknown slots stay null; unsupported asks
-│   │                     listed, never faked)
-│   ├── validator.py      pure code: enum/operator legality, trigger x condition
-│   │                     compatibility, required params, scope, and PROVENANCE — every
-│   │                     free-text value (tag, person, keyword) must appear in the user's
-│   │                     own words, or it's scrubbed and re-asked
-│   ├── workspace.py      entity resolution against a workspace fixture (workspace.json):
-│   │                     LLM lookup tools + the code-side re-verification of every model
-│   │                     lookup ("the model may look things up, code re-verifies")
-│   ├── copilot.py        turn loop + rendering: draft with ⟨required⟩ holes -> up to 3
-│   │                     planned questions per turn -> final WHEN/IF/THEN + machine JSON
-│   ├── serve2.py         chat UI (http://127.0.0.1:8001)
-│   ├── cli.py            stdin -> stdout single turn (eval adapter)
-│   ├── simulate.py       multi-turn self-play: a simulator LLM plays the admin (knows the
-│   │                     target rule, opens vague, answers only what's asked, reviews the
-│   │                     result); deterministic grader judges accuracy, LLM judge scores
-│   │                     conversation quality
-│   └── test_validator.py schema coverage (all 40 core eval records must validate) + units
+├── engine/                      the App Activation engine
+│   ├── router.py                  1st call each turn: classifies track
+│   │                               (automation | app_setup) before either
+│   │                               package's schema even loads
+│   ├── app_catalog.py              THE single per-app object/field catalog
+│   │
+│   ├── automation/                Track B: per-conversation automations
+│   │   ├── schema.py                 triggers, conditions, actions,
+│   │   │                             RECIPES, NATIVE_ACTIONS
+│   │   ├── extract.py                2nd LLM call — automation-only wire
+│   │   │                             schema; routes to recipe |
+│   │   │                             native_action_id | custom_plan |
+│   │   │                             unsupported
+│   │   ├── planner.py                read-only schema-exploration tool
+│   │   │                             calls feeding a model-composed
+│   │   │                             custom_plan
+│   │   ├── plan_validator.py         guardrails for a composed plan: real
+│   │   │                             object/field refs only, no forward
+│   │   │                             references, assignable/taggable-only
+│   │   │                             terminals
+│   │   ├── validator.py              pure code: provenance, entity
+│   │   │                             resolution, question planning,
+│   │   │                             the 4-way connector branch
+│   │   └── executor.py               runs a recipe's/plan's chain, or a
+│   │                                 native action, for real (mocked)
+│   │
+│   ├── apps/                      Track A: configuring an existing app
+│   │   │                          feature (no trigger/actions)
+│   │   ├── schema.py                 FEATURES (kind: "view"|"write")
+│   │   ├── extract.py                2nd LLM call — app-setup-only wire
+│   │   │                             schema
+│   │   └── setup.py                  pure code: resolve_setup() — auth ->
+│   │                                 objects -> fields -> inboxes ->
+│   │                                 Prefill Fields -> Quick Access;
+│   │                                 preview_feature()/test_create()
+│   │
+│   ├── connected_apps.py           SHARED: prerequisite/connection state
+│   ├── connected_apps.json         demo fixture (starts disconnected)
+│   ├── feature_requests.py         Discovery's "log as a feature
+│   │                               request?" — in-memory, deduped log
+│   ├── analytics.py                in-memory analytics event log
+│   ├── salesforce_mock.py          mock Salesforce API
+│   ├── salesforce_schema.py        Track B's Salesforce object/field
+│   │                               vocabulary — derived from app_catalog.py
+│   ├── salesforce_fixture.json     contacts/accounts/account_team/...
+│   ├── clickup_mock.py             second real app's mock service
+│   │
+│   ├── mailbox_lookup.py           capability 7: real testable
+│   │                               conversations, scoped by inbox +
+│   │                               optional contact-matching
+│   ├── copilot.py                  outer turn loop: router -> (automation
+│   │                               | apps) -> render; the app-action-
+│   │                               required scope gate lives here
+│   ├── docent.py                   capability-question answers, composed
+│   │                               only from the schema files above
+│   ├── workspace.py / workspace.json  entity-resolution fixture
+│   ├── preview.py                  dry-run a final rule over the mailbox
+│   │                               fixture
+│   │
+│   ├── serve_apps.py               Apps-panel dev server (port 8011) —
+│   │                               the only active local entry point
+│   ├── cli.py                      eval CLI (stdin -> stdout)
+│   ├── make_mailbox.py / mailbox.json  demo inbox fixture
+│   │
+│   ├── test_*.py                   pure-code test suites, one per
+│   │                               capability/concern (see engine/README.md
+│   │                               for what each one locks in)
+│   └── README.md                   dev changelog, every phase in order
 │
-├── eval/              the measurement system
-│   ├── real-world-eval-set.jsonl   105 eval records mined from REAL production automations
-│   │                               (anonymized). Each = a hand-written plain-English ask +
-│   │                               the actual rule an admin built as ground truth, tagged
-│   │                               with scope_flags so the supported-surface decision stays
-│   │                               a scoring-time filter
-│   ├── grader.py                   canonicalize both vocabularies -> per-slot diff
-│   │                               (trigger / conditions / actions / ai_extract)
-│   ├── run_eval.py                 capture-only runner (echo / any CLI / OpenAI prompt)
-│   ├── report.py                   scoreboard: strict match, slot table, slices, over-asking
-│   │                               counter, failure dump, needs-judge list
-│   ├── build/                      reproducible mining pipeline (dump -> candidates ->
-│   │                               authored annotations -> eval set)
-│   └── runs/                       every run + report ever taken, including the sim
-│                                   transcripts — the full audit trail of the numbers below
+├── eval/                        App Activation eval sets
+│   ├── connector-eval-set.jsonl    6 records, Track B connector automations
+│   ├── apps-eval-set.jsonl         12 records, Track A capabilities +
+│   │                               the router boundary
+│   ├── grader.py / report.py / run_eval.py  the connector set's harness
+│   │                               (shared with the general engine
+│   │                               originally, canonicalize/diff logic
+│   │                               is schema-driven either way)
+│   ├── apps_grader.py / apps_report.py  Track A's own small parallel
+│   │                               harness (no trigger/actions to diff)
+│   └── README.md                   what each set covers, how to run them
 │
-├── automation-copilot-one-pager-2026-07-12.md      product one-pager
-├── competitor-study-ai-automation-building-2026-07-12.md
-├── call-prep-design-review-2026-07-20.md
-├── next-version-scope.md                            deferred items from v1
-└── rule-menu.md
+├── ui/                           Next.js playground
+│   ├── app/apps/page.tsx           the Apps panel — the whole active UI
+│   ├── app/page.tsx                "/" just redirects to "/apps"
+│   ├── components/                 RuleCard, FeatureCard, QuestionForm,
+│   │                               CapabilityBadges — all shared between
+│   │                               what little "/" still does and "/apps"
+│   ├── lib/api.ts                  the Apps panel's API client
+│   ├── api/*.py                    Vercel serverless functions for the
+│   │                               general panel — still deployed, but
+│   │                               nothing in the active UI calls them
+│   │                               anymore (see "Known gaps" below)
+│   └── api/_engine/                a vendored copy of engine/ for Vercel
+│                                   deployment — re-synced via
+│                                   scripts/sync-engine.sh, never hand-edited
+│
+├── PRD.md                        product PRD — capability catalogue,
+│                                 guardrails, open questions
+├── README.md                     this file
+└── legacy/                       everything from the pre-App-Activation
+                                  scope — see legacy/README.md
 ```
-
-The v1 prototype (prompt-engineering approach, golden dataset, its own serve UI) lives
-outside this repo; the eval baseline numbers below were measured against it.
-
-## The results
-
-Single-turn extraction, 40 core-scope real-world records, strict full-rule match:
-
-| engine | strict | trigger | conditions | actions | over-asks |
-|---|---|---|---|---|---|
-| v1 (prompt engine, baseline) | 27/40 | 88% | 72% | 100% | 0 |
-| v1.1 (ask-first prompt fixes) | 28/40 | 95% | 72% | 100% | 0 |
-| v2.3 | 36/40 (90%) | 98% | 92% | 100% | 0 |
-| v2.4.3 (+ai_extract) | 36/40 (90%) | 98% | 92% | 100% | 0 |
-| **v2.5.4 (this repo)** | **37/40 (92%)** | 98% | 95% | 100% | 0 |
-
-AI extraction (v2.4, 2026-08-09): the AI step (`ai_extract` variables, `ai_variable`
-gating conditions, `{{variable}}` note templates) is now in the supported surface —
-275 prod automations use it. On the 18-record `uses_ai` slice: **12/18 strict, 12/16
-(75%) of supported-scope records** (2 need custom fields, still out of scope). AI
-variable names/descriptions are graded name-agnostically — see `engine/README.md`.
-
-Entity validation (v2.5, 2026-08-09): extraction can call workspace lookup tools
-(`find_user`, `list_tags`, `list_inboxes`) to canonicalize names, and the validator
-re-verifies every lookup from the user's own words — exact matches canonicalize,
-unique fuzzy matches resolve with disclosure, ambiguous ones ask (two Johns), unknown
-tags get a "create it first" note. Workspace-less runs are byte-identical, so eval
-numbers are unaffected — see `engine/README.md`.
-
-Entity eval slice (v2.6.1, 2026-08-09): `eval/entity-eval-set.jsonl`, 10 records graded
-on the final rule AND transcript conduct (`must_mention`/`must_not_mention`): **10/10**,
-after the slice caught two real extraction bugs (null slots on ambiguous entities;
-supported-but-valueless asks misfiled as unsupported). Full board at v2.6.1:
-**entity 10/10 · multi-turn 12/12 · core-40 37/40 · uses_ai 12/18.**
-
-Production coverage (2026-08-09): the v2.6.1 surface can fully build **91.8% of the
-3,892 organic automations** real admins created in the 90-day window (82.4% of tenants
-completely covered). Biggest remaining blockers, by measured demand: saved-list
-operators (`is_present_in`), custom fields — not connectors (0.8%). Method + unlock
-table: `eval/coverage-2026-08-09.md`, reproducible via `eval/build/coverage.py`.
-
-Multi-turn self-play (10 episodes, vague opening, simulator-as-admin):
-**10/10 completed, 9/10 strict match, avg 2.9 copilot turns, 0 redundant questions.**
-
-Multi-turn eval (v2.5.5, 2026-08-09): the clarification loop now has scored ground
-truth — `eval/multi-turn-eval-set.jsonl`, 12 scripted conversations (vague openings,
-drip-fed values, linkage ambiguity, corrections, batched answers): **12/12 strict,
-avg 2.2 copilot turns, 0 over-asks**, after a 5-iteration ladder (8→12) whose fixes
-also raised core-40 to 37/40. See `engine/README.md` for the run-by-run story.
-
-Remaining known misses are documented, not hidden: 3 `is`↔`contains` operator equivalences
-(needs an LLM judge to adjudicate), 1 ambiguous any-direction trigger, and 1 AND-vs-OR
-linkage guess when conditions arrive across separate turns (should become an explicit
-question). See `engine/README.md` for the full run-by-run history, including the failures
-each iteration caught — the 0/40 grader-vocab run and the 16/40 over-asking run are part of
-the story.
-
-## Why the eval set is the interesting part
-
-Most copilot evals are hand-written and test what the author imagined. This one is mined
-from 6,412 real production automations (90-day window): stratified 105 records across the
-real distribution — keyword taggers, sender routing, follow-up nudges, AI classification,
-connectors — with the actual admin-built rule as ground truth and PII anonymized
-(domains → `company-NN.example`, personal addresses → `personNN@`). Real admin *mistakes*
-are preserved and flagged (`notes`), because the extraction target is what the admin built.
-Full provenance and method: `eval/README.md`.
 
 ## Run it
 
-Needs Python 3.9+, an OpenAI API key, and `pip install openai` (plus `pandas` only for
-re-mining the eval set from a dump).
+Needs Python 3.9+, an OpenAI API key, and `pip install openai`.
 
 ```bash
-export OPENAI_API_KEY=sk-...        # engine/extract.py also reads a sibling .env if present
+export OPENAI_API_KEY=sk-...        # engine/router.py also reads a sibling .env if present
 
-# chat UI
-cd engine && python serve2.py       # -> http://127.0.0.1:8001
+# Apps panel — the only active local entry point
+cd engine && python serve_apps.py   # -> http://127.0.0.1:8011
+cd ui && pnpm dev                   # -> http://localhost:3000 (redirects "/" to "/apps")
 
-# tests (no API calls)
-cd engine && python test_validator.py
-cd eval   && python grader.py --self-test
+# tests (no API calls — pure code, one file per capability/concern)
+cd engine
+python test_validator.py        python test_connector.py
+python test_connector_planner.py python test_track_a.py
+python test_native_action.py     python test_mapping_explanation.py
+python test_real_conversation.py python test_feature_request_offer.py
+python test_app_scope.py
 
-# single-turn eval
-cd eval && python run_eval.py --engine command \
-    --cmd "python $(pwd)/../engine/cli.py" --scope core
+# eval harness self-checks (no API calls)
+cd eval && python grader.py --self-test && python apps_grader.py --self-test
+python run_eval.py --engine echo               # connector-eval-set.jsonl, report must say 100%
+python run_eval.py --engine echo --eval-set apps-eval-set.jsonl
+
+# a real eval run needs OPENAI_API_KEY:
+python run_eval.py --engine command --cmd "python ../engine/cli.py --apps-workspace"
 python report.py runs/<run>.jsonl --failures
-
-# multi-turn simulation (~90 API calls)
-cd engine && python simulate.py
 ```
 
-Note: `extract.py` currently resolves the API key from `../automation-copilot/.env`
-(the v1 project's location on the original machine); set `OPENAI_API_KEY` in the
-environment or adjust `load_env()` when running elsewhere.
+Re-vendor the engine into `ui/api/_engine` (needed after any `engine/`
+change, before deploying) with `cd ui && bash scripts/sync-engine.sh`.
+
+## Known gaps
+
+- **`ui/api/*.py` (the Vercel serverless functions) still serve the
+  general Automations panel's endpoints** (`/api/chat`, `/api/workspace`,
+  `/api/vocabulary`, `/api/preview`), but nothing in the active UI calls
+  them anymore now that "/" just redirects to "/apps". They're harmless
+  (unreachable dead code from the deployed site's own frontend), not
+  wired up incorrectly — but the Apps panel has no Vercel-deployed
+  backend of its own yet (`serve_apps.py` is local-dev-only), so the
+  deployed site currently has no working app-scoped API at all. Building
+  that is real follow-on work, not done as part of this scoping pass.
+- Real production activation, live (non-mock) API clients, real OAuth,
+  and a multi-tenant account model are all explicitly out of scope — see
+  `PRD.md` §9 for the full list and why.
 
 ## Data & privacy
 
-- The raw production dump is **not** in this repo and must never be committed.
-- The eval set is anonymized (emails/domains/personal local-parts), but some free-text
-  condition values from real automations remain (e.g. person names inside subject-line
-  matchers). **Keep this repo private**; a public release would need a second scrub pass.
-- `eval/runs/` contains model outputs only — no customer data beyond the anonymized values
-  already in the eval set.
+- No real production data lives in this repo. `connected_apps.json`,
+  `workspace.json`, `salesforce_fixture.json`, and `mailbox.json` are all
+  demo fixtures.
+- `eval/connector-eval-set.jsonl` and `eval/apps-eval-set.jsonl` are
+  hand-authored records against those same fixtures — no real tenant data.
 
 ## Design decisions worth knowing
 
-1. **Provenance over politeness**: the validator rejects any free-text value that doesn't
-   appear in the user's own messages. This single rule killed the hallucinated-tag failure
-   class that prompt engineering could not (3 documented attempts in v1).
-2. **Meta-language guard**: "match on specific senders" is a mechanism, not a value —
-   a blocklist keeps echoed question-language from becoming rule content (found by the
-   simulator, day one).
-3. **Assumptions are disclosed, not asked**: trigger defaults to "new inbound conversation"
-   when unstated (82% of production rules) and the draft says so — asking about it made the
-   first v2 run over-question on 13/40 fully-specified requests.
-4. **Runner and grader are separate** so grader fixes never re-cost API calls, and every
-   run file carries engine/model/prompt-sha for comparability.
-5. **Condition semantics** (groups AND'd, within-group OR'd, values any-of) are inferred
-   from production data and still await engineering confirmation — flagged everywhere they
-   matter.
+1. **The model only extracts, the code decides**: capability answers,
+   badges, and gating are composed in code from the schema files, never
+   invented by the model.
+2. **Provenance over politeness**: the validator rejects any free-text
+   value that doesn't appear in the user's own messages — scrubbed and
+   re-asked, never guessed.
+3. **Three connector mechanisms, in trust order**: a hand-vetted `recipe`
+   (fastest, ships once per proven use case), a pre-built `native_action_id`
+   (Hiver's own action block for the app), and a model-composed
+   `custom_plan` (the least benefit of the doubt — must actually execute
+   successfully against the mock before it counts as complete).
+4. **Assumptions are disclosed, not asked**: a legal-either-way slot (like
+   "run on everything") gets a stated assumption on the draft, confirmed
+   at apply time — never a blocking question for something that already
+   has a legal default.
+5. **App Activation only, everywhere**: the same "does this touch a real
+   app?" boundary is enforced once, in `copilot.py`, rather than
+   re-implemented per surface — see this README's Charter section above.

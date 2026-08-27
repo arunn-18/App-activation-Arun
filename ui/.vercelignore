@@ -1,0 +1,7 @@
+# Keep the deploy payload to source only. Without this the CLI can walk the
+# whole 960MB working dir (node_modules + .next) and the upload stalls.
+node_modules
+.next
+.git
+*.log
+.DS_Store

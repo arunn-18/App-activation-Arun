@@ -1,97 +1,28 @@
-"""Validator/schema self-test.
+"""Validator/schema self-test: the failure modes this engine exists to kill
+(VIP hallucination, missing tag, unnamed scope, illegal combos, unsupported
+asks). automation/validator.py is shared machinery — every app automation
+still needs its trigger/conditions/entity-resolution/provenance checked the
+same way a generic rule would, copilot.py's own "needs an app action" gate
+(see test_app_scope.py) sits on TOP of this, not instead of it.
 
-1. Schema coverage: every core-scope eval record's ideal_output, converted to a v2
-   spec and validated against its own user_query, must come back "complete" —
-   proving the schema covers real prod rules and provenance accepts real queries.
-2. Unit cases: the failure modes v2 exists to kill (VIP hallucination, missing tag,
-   unnamed scope, illegal combos, unsupported asks).
+App Activation only (2026-08-27 cleanup): this file used to also run a
+"schema coverage" pass against eval/real-world-eval-set.jsonl (105 pure-Hiver
+prod records with no app action in them at all) to prove the schema covered
+real prod rules generically. That eval set moved to legacy/eval/ along with
+the rest of the pre-Apps-Activation material (see legacy/README.md) — this
+file's job now is proving the SHARED mechanics below are correct, not
+re-validating an eval set this engine no longer targets.
 
 Run: python3 test_validator.py
 """
-import json
 import sys
-from pathlib import Path
 
-import validator
+from automation import validator
 import workspace as wsmod
-
-EVAL_SET = Path(__file__).parent.parent / "eval" / "real-world-eval-set.jsonl"
-
-
-def prod_to_spec(ideal):
-    """Convert an eval ideal_output (prod dump shape) to a v2 spec."""
-    actions = []
-    for a in ideal["actions"]:
-        t = a["type"]
-        if t == "add_tag" or t == "remove_tag":
-            actions.append({"type": t, "tags": a.get("tags", [])})
-        elif t == "assign":
-            actions.append({"type": "assign", "target": a.get("target")})
-        elif t == "assign_among":
-            actions.append({"type": "assign_among", "targets": a.get("targets", [])})
-        elif t == "status":
-            actions.append({"type": "status", "status_value": a.get("status")})
-        elif t == "add_note":
-            actions.append({"type": "add_note", "content": a.get("content"),
-                            "pinned": a.get("pinned", False)})
-        elif t == "send_mail":
-            actions.append({"type": "send_mail", "body_hint": "saved template"})
-        elif t == "send_notification":
-            actions.append({"type": "send_notification",
-                            "email_enabled": bool((a.get("detail") or {}).get("isSendMailEnabled"))})
-        elif t in ("add_to_sm", "remove_from_sm"):
-            actions.append({"type": t, "inbox": "named in query"})
-        else:
-            actions.append({"type": t})
-    groups = [[{"property": c["property"], "op": c["op"], "values": c.get("values", []),
-                "variable": (c.get("ai_variable") or {}).get("name")}
-               for c in g] for g in ideal["condition_groups"]]
-    ai_extract = None
-    if ideal.get("ai_extract"):
-        ai_extract = {"variables": [
-            {"name": v["name"], "type": v["type"],
-             "description": v.get("description", ""), "options": v.get("options") or []}
-            for v in ideal["ai_extract"]["variables"]]}
-    return {"trigger": ideal["trigger"], "scope_confirmed": True,
-            "condition_groups": groups, "actions": actions,
-            "ai_extract": ai_extract, "unsupported_requests": []}
 
 
 def run():
     fails = 0
-
-    # ---- 1. schema coverage: core-scope records + the AI slice (uses_ai without
-    #         still-unsupported features)
-    records = list(map(json.loads, open(EVAL_SET)))
-    OUT_OF_SCOPE = {"uses_custom_field", "uses_connector", "uses_custom_object"}
-    core = [r for r in records
-            if not r["scope_flags"]
-            or ("uses_ai" in r["scope_flags"]
-                and not OUT_OF_SCOPE & set(r["scope_flags"]))]
-    for r in core:
-        spec = prod_to_spec(r["ideal_output"])
-        res = validator.validate(spec, r["user_query"])
-        if r["id"] == "rw-056":
-            # documented source wart (see the record's notes): the real admin's note
-            # template references {{urgency_label}} but the variable is urgency_level.
-            # The validator MUST flag it — a copilot may never emit a dangling ref.
-            if not any("undefined AI variable" in e for e in res["errors"]):
-                fails += 1
-                print(f"COVERAGE FAIL {r['id']}: admin's dangling "
-                      "{{urgency_label}} ref not caught")
-            continue
-        if res["status"] != "complete":
-            fails += 1
-            print(f"COVERAGE FAIL {r['id']}: {res['status']}")
-            for e in res["errors"]:
-                print("   error:", e)
-            for m in res["missing"]:
-                print("   missing:", m["slot"])
-            for h in res["hallucinated"]:
-                print("   hallucinated:", h["slot"], "=", h["value"][:60])
-    print(f"schema coverage: {len(core) - fails}/{len(core)} core eval records complete")
-
-    # ---- 2. unit cases
     units = 0
 
     def check(name, cond):
@@ -222,6 +153,7 @@ def run():
     res = validator.validate(
         {"trigger": "new_conversation_inbound", "scope_confirmed": True,
          "condition_groups": [], "actions": [{"type": "add_tag", "tags": ["Urgent"]}],
+         "enabled_inboxes": ["Support"],
          "unmappable": [{"request": "an existing tag VIP",
                          "why": "no condition property for tags"}]},
         "tag urgent when it already has tag VIP", ws_fix)
@@ -243,6 +175,49 @@ def run():
           "New conversation (inbound) is received" in a)
     check("docent: unknown topic gets the overview",
           docent.answer("quantum entanglement") == docent.answer(""))
+
+    # ---- docent keyword matching is word-boundary-aware, not naive substring
+    # (2026-08-27 live review): "ai" inside "explain"/"maintain", "tag" inside
+    # "advantage", "move" inside "remove", "api" inside "capital" must NOT
+    # spuriously match a short topic keyword -- a real live bug, not a
+    # hypothetical one (a meta-question containing "explain" was routed to
+    # the AI-variables topic purely because "ai" is a substring of "explain").
+    overview = docent.answer("")
+    check("'explain' does not spuriously match the 'ai' keyword",
+          docent.answer("will you suggest features if I explain my workflow")
+          == overview)
+    check("'advantage' does not spuriously match the 'tag' keyword",
+          docent.answer("what's the advantage of this approach") == overview)
+    check("'remove' does not spuriously match the 'move' keyword",
+          docent.answer("can you remove duplicates") == overview)
+    check("'capital' does not spuriously match the 'api' keyword",
+          docent.answer("what's the capital investment needed") == overview)
+    check("a genuine whole-word 'ai' still matches the AI-variables topic",
+          "AI variables" in docent.answer("what can AI detect"))
+    check("a genuine whole-word 'tag' still matches the tags topic",
+          "Tags work two ways" in docent.answer("how do tags work"))
+
+    # ---- docent.relevant_capabilities(): the structured sibling of answer()
+    b = docent.relevant_capabilities("clickup integration")
+    check("relevant_capabilities scoped to ClickUp names only ClickUp entries",
+          b and all(x["app"] == "clickup" for x in b)
+          and any(x["id"] == "clickup_create_task_from_hiver" and x["kind"] == "app_feature"
+                  for x in b)
+          and any(x["id"] == "clickup_create_task" and x["kind"] == "native_action" for x in b))
+    b2 = docent.relevant_capabilities("salesforce integration")
+    check("relevant_capabilities scoped to Salesforce names only Salesforce entries, "
+          "including the recipe",
+          b2 and all(x["app"] == "salesforce" for x in b2)
+          and any(x["kind"] == "recipe" for x in b2))
+    b3 = docent.relevant_capabilities("what integrations do you support")
+    check("no app named -> every app's entries, same scope answer()'s own text covers",
+          {x["app"] for x in b3} == {"salesforce", "clickup"})
+    check("a non-integration topic has no discrete capability to badge -- "
+          "empty, not invented",
+          docent.relevant_capabilities("assignment options") == []
+          and docent.relevant_capabilities("what triggers exist") == [])
+    check("no topic at all -> no badges",
+          docent.relevant_capabilities(None) == [] and docent.relevant_capabilities("") == [])
 
     # ---- preview dry-run: deterministic matcher over the mailbox fixture
     import preview as pv
@@ -349,7 +324,8 @@ def run():
           and any("more than one" in q for q in res["questions"]))
 
     spec_s = {"trigger": "new_conversation_inbound", "scope_confirmed": True,
-              "condition_groups": [], "actions": [{"type": "assign", "target": "sarah"}]}
+              "condition_groups": [], "actions": [{"type": "assign", "target": "sarah"}],
+              "enabled_inboxes": ["Support"]}
     res = validator.validate(spec_s, "assign every new email to sarah", ws=ws)
     check("unique fuzzy resolves without asking", res["status"] == "complete"
           and res["resolutions"]
@@ -359,7 +335,8 @@ def run():
 
     res = validator.validate(
         {"trigger": "new_conversation_inbound", "scope_confirmed": True,
-         "condition_groups": [], "actions": [{"type": "assign", "target": "Sarah Lee"}]},
+         "condition_groups": [], "actions": [{"type": "assign", "target": "Sarah Lee"}],
+         "enabled_inboxes": ["Support"]},
         "assign every new email to sarah", ws=ws)
     check("model's tool resolution re-verified from user's words",
           res["status"] == "complete" and not res["hallucinated"])
@@ -373,7 +350,8 @@ def run():
 
     res = validator.validate(
         {"trigger": "new_conversation_inbound", "scope_confirmed": True,
-         "condition_groups": [], "actions": [{"type": "add_tag", "tags": ["gold-partner"]}]},
+         "condition_groups": [], "actions": [{"type": "add_tag", "tags": ["gold-partner"]}],
+         "enabled_inboxes": ["Support"]},
         "tag all new emails gold-partner", ws=ws)
     check("unknown tag builds with create-first note", res["status"] == "complete"
           and res["entity_notes"])
@@ -384,6 +362,30 @@ def run():
     spec_t = validator.apply_resolutions(spec_t, res)
     check("tag casing canonicalized to workspace form",
           spec_t["actions"][0]["tags"] == ["VIP"])
+
+    # ---- enabled_inboxes: EVERY automation needs this once a workspace is
+    # loaded — a rule doesn't run workspace-wide any more than a Track A
+    # feature does (that step's own precedent). Skipped entirely with no
+    # workspace (the 56/56 core eval records above never set this and still
+    # reach "complete", proving the ws=None skip already holds).
+    otherwise_complete = {"trigger": "new_conversation_inbound", "scope_confirmed": True,
+                          "condition_groups": [], "actions": [{"type": "add_tag", "tags": ["VIP"]}]}
+    res = validator.validate(otherwise_complete, "tag urgent emails VIP", ws=ws)
+    check("missing enabled_inboxes blocks completion once a workspace is loaded",
+          res["status"] == "needs_info")
+    inbox_q = next(q for q in res["questions_structured"] if q["slot"] == "enabled_inboxes")
+    check("the inbox question is an actual multi-select of REAL workspace inboxes",
+          inbox_q["kind"] == "choice" and inbox_q["multiple"] is True
+          and {o["value"] for o in inbox_q["options"]} == {"Support", "Billing", "Events"})
+
+    with_inboxes = {**otherwise_complete, "enabled_inboxes": ["Support", "Billing"]}
+    res = validator.validate(with_inboxes, "tag urgent emails VIP", ws=ws)
+    check("naming inbox(es) clears the gate -- otherwise-complete rule finishes",
+          res["status"] == "complete")
+
+    res = validator.validate(otherwise_complete, "tag urgent emails VIP", ws=None)
+    check("no workspace context -> enabled_inboxes not required at all",
+          res["status"] == "complete")
 
     # ---- coherence: contradictions and conflicting actions
     res = validator.validate(
@@ -439,7 +441,8 @@ def run():
     res = validator.validate(
         {"trigger": "new_conversation_inbound", "scope_confirmed": True,
          "condition_groups": [],
-         "actions": [{"type": "add_tag", "tags": ["gold-partner"]}]},
+         "actions": [{"type": "add_tag", "tags": ["gold-partner"]}],
+         "enabled_inboxes": ["Support"]},
         "tag all new emails gold-partner", ws=ws)
     check("unknown tag with no near-miss keeps create-first note",
           res["status"] == "complete" and res["entity_notes"])

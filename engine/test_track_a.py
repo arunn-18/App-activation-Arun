@@ -1,0 +1,411 @@
+"""Track A tests: a real multi-turn setup flow (Authentication -> pick
+records -> pick fields per record, from a mocked "describe" call -> enable
+for the shared inbox(es) it applies to), per the 2026-08-18 product spec
+("Apps Activation Steps: Usecase-wise steps"). Pure code, no LLM call,
+except where noted.
+
+This file replaced an earlier, much smaller version that only checked a
+single yes/no prerequisite gate — a real live run showed that shape was
+wrong: Track A needs the SAME guided-setup mechanics real product use cases
+require (pick objects, pick fields from a live API call, pick which
+inbox(es) to enable for). See features.resolve_setup()'s module docstring
+for the full step order.
+
+The enable step asks WHICH shared inbox(es) this should apply to instead of
+a plain yes/no CTA — naming inbox(es) is itself the enable action. It reads
+the same demo workspace fixture (workspace.py's shared_inboxes) the
+automation track already uses for entity resolution, defaulting to it when
+a caller doesn't pass one (see resolve_setup()'s own docstring).
+
+router.classify() and apps.extract.extract() are monkeypatched in the
+multi-turn section to isolate copilot.py's ACCUMULATION logic (does the
+flat setup spec correctly flow into features.resolve_setup() turn over
+turn?) from the LLM's own reliability at choosing a track and filling
+those slots from free-form English, which is a separate,
+not-yet-verifiable-here concern (see test_connector.py's module docstring
+for the same caveat on Track B).
+
+Run: python3 test_track_a.py
+"""
+import sys
+
+import connected_apps
+import copilot
+import router
+import workspace as wsmod
+from apps import extract
+from apps import schema
+from apps import setup as features
+
+FEATURE_ID = "salesforce_account_contact_details"
+WRITE_FEATURE_ID = "salesforce_create_contact"
+
+
+def _disconnected_ws():
+    return connected_apps.load()  # ships disconnected by default
+
+
+def _connected_ws():
+    ws = connected_apps.load()
+    entry = ws["connected_apps"]["salesforce"]
+    entry["connected"] = True
+    for p in entry["prerequisites"]:
+        entry["prerequisites"][p] = True
+    return ws
+
+
+def _setup(**kwargs):
+    base = {"connect_requested": None, "objects": None,
+            "account_fields": None, "contact_fields": None, "inboxes": None}
+    base.update(kwargs)
+    return base
+
+
+def run():
+    fails = 0
+    units = 0
+
+    def check(name, cond):
+        nonlocal fails, units
+        units += 1
+        if not cond:
+            fails += 1
+            print(f"UNIT FAIL: {name}")
+
+    # ---- step 1: authentication ----------------------------------------------
+    disconnected = _disconnected_ws()
+    r = features.resolve_setup(FEATURE_ID, _setup(), disconnected)
+    check("fresh start, disconnected -> needs_info", r["status"] == "needs_info")
+    check("asks to connect, not a generic error",
+          r["questions_structured"] and r["questions_structured"][0]["slot"]
+          == "feature_setup.connect")
+    check("connect question offers the real CTA",
+          r["questions_structured"][0]["options"] == [{"label": "Connect Salesforce",
+                                                        "value": "connect salesforce"}])
+    check("progress reports not connected yet", r["progress"]["connected"] is False)
+
+    r2 = features.resolve_setup(FEATURE_ID, _setup(connect_requested=True), disconnected)
+    check("connect_requested flips the SAME apps_ws in place",
+          connected_apps.is_connected(disconnected, "salesforce"))
+    check("after connecting, moves past auth to the next step",
+          r2["status"] == "needs_info"
+          and r2["questions_structured"][0]["slot"] == "feature_setup.objects")
+
+    # ---- step 2: record-level visibility (objects) ---------------------------
+    connected = _connected_ws()
+    r3 = features.resolve_setup(FEATURE_ID, _setup(), connected)
+    check("connected, no objects yet -> asks which records",
+          r3["status"] == "needs_info"
+          and r3["questions_structured"][0]["slot"] == "feature_setup.objects")
+    check("object choices are exactly this feature's own list",
+          {o["value"] for o in r3["questions_structured"][0]["options"]} == {"Account", "Contact"})
+
+    r4 = features.resolve_setup(FEATURE_ID, _setup(objects=["Opportunity"]), connected)
+    check("an object outside this feature's choices is rejected, not silently accepted",
+          r4["status"] == "needs_info" and r4["errors"])
+
+    # ---- step 3: field config - read (per object, from the mock describe call)
+    r5 = features.resolve_setup(FEATURE_ID, _setup(objects=["Account"]), connected)
+    check("objects chosen, no fields yet -> asks Account fields",
+          r5["status"] == "needs_info"
+          and r5["questions_structured"][0]["slot"] == "feature_setup.account_fields")
+    offered = {o["value"] for o in r5["questions_structured"][0]["options"]}
+    check("field options include BOTH standard and custom fields (a real describe call)",
+          {"Account Name", "Renewal Date"} <= offered)
+
+    r6 = features.resolve_setup(
+        FEATURE_ID, _setup(objects=["Account", "Contact"], account_fields=["Account Name"]),
+        connected)
+    check("Account done, Contact not yet -> asks Contact fields next (in order)",
+          r6["status"] == "needs_info"
+          and r6["questions_structured"][0]["slot"] == "feature_setup.contact_fields")
+
+    # ---- step 4: enable -- which shared inbox(es), not a plain yes/no CTA -----
+    demo_ws = wsmod.load()
+    real_inboxes = {i["name"] for i in demo_ws["shared_inboxes"]}
+
+    r7 = features.resolve_setup(
+        FEATURE_ID,
+        _setup(objects=["Account"], account_fields=["Account Name", "Account Owner"]),
+        connected)
+    check("all fields chosen, no inboxes yet -> asks which inbox(es) to enable for",
+          r7["status"] == "needs_info"
+          and r7["questions_structured"][0]["slot"] == "feature_setup.inboxes")
+    check("inbox options are the real workspace shared inboxes, not invented",
+          {o["value"] for o in r7["questions_structured"][0]["options"]} == real_inboxes)
+
+    r7b = features.resolve_setup(
+        FEATURE_ID,
+        _setup(objects=["Account"], account_fields=["Account Name", "Account Owner"],
+               inboxes=["Not A Real Inbox"]),
+        connected)
+    check("an inbox not in the workspace is rejected, not silently accepted",
+          r7b["status"] == "needs_info" and r7b["errors"])
+
+    r8 = features.resolve_setup(
+        FEATURE_ID,
+        _setup(objects=["Account"], account_fields=["Account Name", "Account Owner"],
+               inboxes=["Support", "Billing"]),
+        connected)
+    check("inbox(es) named -> complete (naming them IS the enable action)",
+          r8["status"] == "complete")
+    check("enabled feature carries the actual chosen objects/fields/inboxes",
+          r8["feature"]["objects"] == ["Account"]
+          and r8["feature"]["fields_by_object"]["Account"] == ["Account Name", "Account Owner"]
+          and r8["feature"]["inboxes"] == ["Support", "Billing"])
+
+    # ---- capability 4: write-usecase field config (salesforce_create_contact) -
+    # a genuinely separate branch from the view feature above — proves it by
+    # reading a DIFFERENT catalog (WRITABLE_FIELD_CATALOG excludes Contact
+    # Email; nothing here reuses view-usecase wording or data).
+    write_r1 = features.resolve_setup(WRITE_FEATURE_ID, _setup(), connected)
+    check("write feature, no objects yet -> asks which record to CREATE (not 'show')",
+          write_r1["status"] == "needs_info"
+          and "create" in write_r1["questions"][0].lower()
+          and "show" not in write_r1["questions"][0].lower())
+
+    write_r2 = features.resolve_setup(
+        WRITE_FEATURE_ID, _setup(objects=["Contact"]), connected)
+    check("write feature asks 'fill in when creating one', not 'show'",
+          write_r2["status"] == "needs_info"
+          and "fill in when creating one" in write_r2["questions"][0])
+    write_offered = {o["value"] for o in write_r2["questions_structured"][0]["options"]}
+    check("write field options come from WRITABLE_FIELD_CATALOG, not FIELD_CATALOG "
+          "(Contact Email is viewable but not writable, so it's absent here)",
+          write_offered == {"Contact Name", "Contact Phone", "Contact Role",
+                            "Preferred Language"}
+          and "Contact Email" not in write_offered)
+
+    write_r3 = features.resolve_setup(
+        WRITE_FEATURE_ID,
+        _setup(objects=["Contact"], contact_fields=["Contact Name", "Contact Phone"]),
+        connected)
+    check("write feature reaches the SAME shared inbox-enable step as the view feature",
+          write_r3["status"] == "needs_info"
+          and write_r3["questions_structured"][0]["slot"] == "feature_setup.inboxes")
+
+    write_r4 = features.resolve_setup(
+        WRITE_FEATURE_ID,
+        _setup(objects=["Contact"], contact_fields=["Contact Name", "Contact Phone"],
+               inboxes=["Support"]),
+        connected)
+    check("write feature completes with its own fields/inboxes",
+          write_r4["status"] == "complete"
+          and write_r4["feature"]["fields_by_object"]["Contact"]
+              == ["Contact Name", "Contact Phone"]
+          and write_r4["feature"]["inboxes"] == ["Support"])
+
+    # A live-testing gap: the capability-7 "test on a real conversation" nudge
+    # was appearing after a write feature completed, but nothing downstream
+    # is wired to act on it (preview_feature() is deliberately never computed
+    # for a write feature -- there's no existing record to show). Replying to
+    # the nudge just re-rendered the same completion message forever. Fixed
+    # via copilot._is_write_feature() -- pin it down for both features.
+    write_wrapped = dict(write_r4, feature_id=WRITE_FEATURE_ID)
+    check("_is_write_feature() correctly flags a write-kind feature",
+          copilot._is_write_feature(write_wrapped))
+    check("_is_write_feature() correctly clears a view-kind feature",
+          not copilot._is_write_feature({"feature_id": FEATURE_ID}))
+
+    # ---- edge cases -----------------------------------------------------------
+    unknown = features.resolve_setup("not_a_real_feature", _setup(), connected)
+    check("unknown feature id is an error, not a silent no-op / KeyError",
+          unknown["status"] == "invalid")
+
+    none_ctx = copilot.feature_request_result({"feature": FEATURE_ID, **_setup()}, None)
+    check("no apps_ws context -> invalid, not a crash", none_ctx["status"] == "invalid")
+
+    # ---- copilot._turn / respond_structured: routing + turn-over-turn --------
+    # accumulation, exercised through the real pipeline (router.classify and
+    # apps.extract.extract are both stubbed) -- the actual regression the
+    # earlier bug was about.
+    original_classify = router.classify
+    original_extract = extract.extract
+    convo_ws = _disconnected_ws()
+
+    def fake_classify(client, messages, model=None):
+        return {"intent_summary": "test", "track": "app_setup",
+                "capability_question": None, "no_intent": None}
+
+    def fake_extract(client, messages, model=None):
+        text = " ".join(m["content"] for m in messages if m["role"] == "user").lower()
+        setup = _setup()
+        if "connect" in text:
+            setup["connect_requested"] = True
+        if "show account and contact" in text:
+            setup["objects"] = ["Account", "Contact"]
+        if "account name" in text:
+            setup["account_fields"] = ["Account Name", "Account Owner"]
+        if "contact email" in text:
+            setup["contact_fields"] = ["Contact Email"]
+        if "support inbox" in text:
+            setup["inboxes"] = ["Support"]
+        return {"intent_summary": "test", "feature": FEATURE_ID, "closing": False,
+                "unmappable": [], **setup}
+
+    router.classify = fake_classify
+    extract.extract = fake_extract
+    try:
+        msgs = [{"role": "user", "content": "set up salesforce account cards"}]
+        s1 = copilot.respond_structured(None, msgs, apps_ws=convo_ws)
+        check("turn 1: routes to feature track", s1["track"] == "feature")
+        check("turn 1: asks to connect (nothing else is possible yet)",
+              s1["feature_request"]["questions_structured"][0]["slot"]
+              == "feature_setup.connect")
+
+        msgs.append({"role": "assistant", "content": s1["draft"]})
+        msgs.append({"role": "user", "content": "yes, connect salesforce"})
+        s2 = copilot.respond_structured(None, msgs, apps_ws=convo_ws)
+        check("turn 2: connecting persists -- moved on to picking records",
+              s2["feature_request"]["questions_structured"][0]["slot"]
+              == "feature_setup.objects")
+
+        msgs.append({"role": "assistant", "content": s2["draft"]})
+        msgs.append({"role": "user", "content": "show account and contact"})
+        s3 = copilot.respond_structured(None, msgs, apps_ws=convo_ws)
+        check("turn 3: asks fields for the first object",
+              s3["feature_request"]["questions_structured"][0]["slot"]
+              == "feature_setup.account_fields")
+
+        msgs.append({"role": "assistant", "content": s3["draft"]})
+        msgs.append({"role": "user", "content": "account name and account owner"})
+        s4 = copilot.respond_structured(None, msgs, apps_ws=convo_ws)
+        check("turn 4: moves to the second object's fields",
+              s4["feature_request"]["questions_structured"][0]["slot"]
+              == "feature_setup.contact_fields")
+
+        msgs.append({"role": "assistant", "content": s4["draft"]})
+        msgs.append({"role": "user", "content": "contact email"})
+        s5 = copilot.respond_structured(None, msgs, apps_ws=convo_ws)
+        check("turn 5: asks which inbox(es) to enable for",
+              s5["feature_request"]["questions_structured"][0]["slot"]
+              == "feature_setup.inboxes")
+
+        msgs.append({"role": "assistant", "content": s5["draft"]})
+        msgs.append({"role": "user", "content": "enable it for the support inbox"})
+        s6 = copilot.respond_structured(None, msgs, apps_ws=convo_ws)
+        check("turn 6: complete", s6["status"] == "complete")
+        check("turn 6: no fake rule JSON alongside the feature",
+              s6["rule"] is None and s6["test_run"] is None)
+        prose = copilot.respond(None, msgs, apps_ws=convo_ws)
+        check("turn 6: prose confirms by name, never asks an automation question",
+              schema.FEATURES[FEATURE_ID]["name"] in prose)
+        check("turn 6: prose names the inbox it's enabled for, not a bare 'enabled'",
+              "Support" in prose)
+        check("turn 6 (view feature, no preview run yet): DOES get the real-"
+              "conversation nudge -- there IS a code path (preview_feature) "
+              "for it to act on",
+              s6["feature_test_suggestion"] is not None
+              and "Try a real conversation" in prose)
+    finally:
+        router.classify = original_classify
+        extract.extract = original_extract
+
+    # ---- capability 7's nudge must NOT dangle for a completed WRITE feature -
+    # (see _is_write_feature()'s own comment) -- driven through the real
+    # pipeline end to end, not just the unit-level check above.
+    original_classify = router.classify
+    original_extract = extract.extract
+    write_convo_ws = _disconnected_ws()
+
+    def fake_write_extract(client, messages, model=None):
+        text = " ".join(m["content"] for m in messages if m["role"] == "user").lower()
+        setup = _setup()
+        if "connect" in text:
+            setup["connect_requested"] = True
+        if "create a contact" in text:
+            setup["objects"] = ["Contact"]
+        if "contact name" in text:
+            setup["contact_fields"] = ["Contact Name"]
+        if "support inbox" in text:
+            setup["inboxes"] = ["Support"]
+        return {"intent_summary": "test", "feature": WRITE_FEATURE_ID, "closing": False,
+                "unmappable": [], **setup}
+
+    router.classify = fake_classify
+    extract.extract = fake_write_extract
+    try:
+        msgs = [{"role": "user", "content": "let agents create a contact from Hiver"}]
+        msgs.append({"role": "assistant", "content":
+                    copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)["draft"]})
+        msgs.append({"role": "user", "content": "yes, connect salesforce"})
+        msgs.append({"role": "assistant", "content":
+                    copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)["draft"]})
+        msgs.append({"role": "user", "content": "create a contact"})
+        msgs.append({"role": "assistant", "content":
+                    copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)["draft"]})
+        msgs.append({"role": "user", "content": "contact name"})
+        msgs.append({"role": "assistant", "content":
+                    copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)["draft"]})
+        msgs.append({"role": "user", "content": "enable it for the support inbox"})
+        s_final = copilot.respond_structured(None, msgs, apps_ws=write_convo_ws)
+        check("write feature reaches complete via the real pipeline",
+              s_final["status"] == "complete"
+              and s_final["feature_request"]["feature_id"] == WRITE_FEATURE_ID)
+        check("write feature: NO real-conversation nudge in the structured API "
+              "-- this is the exact live-testing bug (nudge shown, nothing to "
+              "act on it)",
+              s_final["feature_test_suggestion"] is None)
+        prose = copilot.respond(None, msgs, apps_ws=write_convo_ws)
+        check("write feature: prose never dangles the nudge either",
+              "Try a real conversation" not in prose)
+    finally:
+        router.classify = original_classify
+        extract.extract = original_extract
+
+    # ---- app_setup track with NO feature match must normalize its spec ------
+    # A real live-testing crash: a capability question ("what's possible with
+    # Salesforce?") on an app_setup-routed turn produced feature=None from
+    # apps.extract.extract() — apps_extract's own spec shape has no trigger/
+    # actions/condition_groups at all (see apps/extract.py's RESPONSE_SCHEMA).
+    # respond_structured() reported "track": "automation" (since feature_
+    # request is None) while handing back that apps-shaped spec verbatim, so
+    # the UI's RuleCard crashed on `spec.actions.length` (undefined). Pin the
+    # fix: an unmatched app_setup turn must get the SAME empty automation
+    # shape a genuinely-empty automation turn already has.
+    original_classify = router.classify
+    original_extract = extract.extract
+
+    def fake_capability_question_classify(client, messages, model=None):
+        return {"intent_summary": "test", "track": "app_setup",
+                "capability_question": "what's possible with salesforce",
+                "no_intent": None}
+
+    def fake_no_match_extract(client, messages, model=None):
+        return {"intent_summary": "test", "feature": None, "connect_requested": None,
+                "objects": None, "account_fields": None, "contact_fields": None,
+                "inboxes": None, "test_contact_email": None, "closing": False,
+                "unmappable": []}
+
+    router.classify = fake_capability_question_classify
+    extract.extract = fake_no_match_extract
+    try:
+        msgs = [{"role": "user", "content": "what's possible with salesforce?"}]
+        s = copilot.respond_structured(None, msgs, apps_ws=_connected_ws())
+        check("unmatched app_setup turn: labeled automation (no feature to show)",
+              s["track"] == "automation" and s["feature_request"] is None)
+        check("unmatched app_setup turn: spec normalized to the SAME empty shape "
+              "a fresh automation turn has -- no leaked apps-only fields",
+              s["spec"]["actions"] == [] and s["spec"]["trigger"] is None
+              and s["spec"]["condition_groups"] == [])
+        check("unmatched app_setup turn: the capability question still gets answered",
+              s["capability_answer"] and "Salesforce" in s["capability_answer"])
+        # the actual crash site: RuleCard.tsx unconditionally reads
+        # spec.actions.length -- this must be a real list, not None/missing
+        check("unmatched app_setup turn: spec.actions.length is computable "
+              "(this is exactly what crashed the UI before this fix)",
+              len(s["spec"]["actions"]) == 0)
+        prose = copilot.respond(None, msgs, apps_ws=_connected_ws())
+        check("prose path handles the same turn without raising",
+              isinstance(prose, str) and len(prose) > 0)
+    finally:
+        router.classify = original_classify
+        extract.extract = original_extract
+
+    print(f"track A unit cases: {units - fails}/{units} passed")
+    print("PASS" if fails == 0 else f"FAIL ({fails})")
+    return fails == 0
+
+
+if __name__ == "__main__":
+    sys.exit(0 if run() else 1)
