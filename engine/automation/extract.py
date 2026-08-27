@@ -111,6 +111,25 @@ EXTRACTION RULES:
    NOT leave trigger null just because the user never said "when". Null only when there
    is no email context at all.
 4b. "unassign" / "remove the assignee" -> action assign with target "UNASSIGN".
+4c. OVERRIDES rule 4's default: a trigger phrased as a THIRD-PARTY APP'S OWN EVENT
+   ("when the linked ClickUp task closes/moves/is updated", "when the Salesforce
+   case is resolved", "when the ticket in Jira changes status") is NOT
+   expressible — every TRIGGER above fires on a HIVER CONVERSATION event only,
+   never on another app's own state change (that is a fundamentally different
+   thing from a connector ACTION, which this engine can call INTO another app —
+   there is no path for another app to call back INTO this engine). Do NOT
+   substitute a Hiver-side trigger as a stand-in for it (e.g. do not default to
+   new_conversation_inbound just because the sentence also mentions "the Hiver
+   conversation"), and do NOT quietly build the actions that depended on it as
+   if the rule would ever fire. Record the WHOLE dependent requirement in
+   unmappable (e.g. {{request: "trigger off the ClickUp task closing", why:
+   "this engine's triggers only fire on Hiver conversation events, never on
+   another app's own state change"}}) and leave trigger null and any action
+   that only makes sense once that event fires OUT of actions. If the SAME
+   message also contains a genuinely separate, fireable Hiver-side automation,
+   build that part normally alongside the unmappable note — don't let one
+   impossible piece block an otherwise-legal rule that happens to share the
+   same sentence.
 5. unsupported_requests is ONLY for capabilities in the UNSUPPORTED list (connectors,
    custom fields...). An ask that maps to a supported action but lacks its value
    ("tag it appropriately", "route it to the right person") is that ACTION with

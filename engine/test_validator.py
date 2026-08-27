@@ -245,6 +245,27 @@ def run():
     check("docent: unknown topic gets the overview",
           docent.answer("quantum entanglement") == docent.answer(""))
 
+    # ---- docent keyword matching is word-boundary-aware, not naive substring
+    # (2026-08-27 live review): "ai" inside "explain"/"maintain", "tag" inside
+    # "advantage", "move" inside "remove", "api" inside "capital" must NOT
+    # spuriously match a short topic keyword -- a real live bug, not a
+    # hypothetical one (a meta-question containing "explain" was routed to
+    # the AI-variables topic purely because "ai" is a substring of "explain").
+    overview = docent.answer("")
+    check("'explain' does not spuriously match the 'ai' keyword",
+          docent.answer("will you suggest features if I explain my workflow")
+          == overview)
+    check("'advantage' does not spuriously match the 'tag' keyword",
+          docent.answer("what's the advantage of this approach") == overview)
+    check("'remove' does not spuriously match the 'move' keyword",
+          docent.answer("can you remove duplicates") == overview)
+    check("'capital' does not spuriously match the 'api' keyword",
+          docent.answer("what's the capital investment needed") == overview)
+    check("a genuine whole-word 'ai' still matches the AI-variables topic",
+          "AI variables" in docent.answer("what can AI detect"))
+    check("a genuine whole-word 'tag' still matches the tags topic",
+          "Tags work two ways" in docent.answer("how do tags work"))
+
     # ---- docent.relevant_capabilities(): the structured sibling of answer()
     b = docent.relevant_capabilities("clickup integration")
     check("relevant_capabilities scoped to ClickUp names only ClickUp entries",

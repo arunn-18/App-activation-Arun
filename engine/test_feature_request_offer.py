@@ -236,6 +236,81 @@ def run():
           s6["questions_structured"] == [] and s6["questions"] == []
           and s6["questions_pending"] == 0)
 
+    # ---- capability answer dedup (2026-08-27 live review) ------------------
+    # A live test found the SAME generic overview rendered twice in a row: a
+    # bare "yes" answering the copilot's OWN meta question ("will you be
+    # able to suggest features...") got misclassified as another capability
+    # question by the router, and docent.answer() has no memory of what it
+    # just said, so the exact same wall of text repeated verbatim -- read as
+    # a broken record, not a second real answer.
+    check("_dedup_capability_answer passes a genuinely new answer through unchanged",
+          copilot._dedup_capability_answer(
+              [{"role": "assistant", "content": "Assignment comes in three forms..."}],
+              "A rule fires on exactly one trigger: ...")
+          == "A rule fires on exactly one trigger: ...")
+    check("_dedup_capability_answer detects the SAME answer already in the "
+          "immediately preceding assistant message and points back to it "
+          "instead of repeating the whole thing",
+          copilot._dedup_capability_answer(
+              [{"role": "user", "content": "yes"},
+               {"role": "assistant", "content": "Two kinds of thing I can set up..."}],
+              "Two kinds of thing I can set up...")
+          != "Two kinds of thing I can set up..."
+          and "Same as I just said" in copilot._dedup_capability_answer(
+              [{"role": "assistant", "content": "Two kinds of thing I can set up..."}],
+              "Two kinds of thing I can set up..."))
+    check("_dedup_capability_answer only looks at the MOST RECENT assistant "
+          "turn -- an older repeat several turns back is a legitimate "
+          "re-answer, not a broken record",
+          copilot._dedup_capability_answer(
+              [{"role": "assistant", "content": "Two kinds of thing I can set up..."},
+               {"role": "user", "content": "assign to dana"},
+               {"role": "assistant", "content": "Done — assigned to Dana."}],
+              "Two kinds of thing I can set up...")
+          == "Two kinds of thing I can set up...")
+    check("_dedup_capability_answer passes None through (no capability "
+          "question this turn)",
+          copilot._dedup_capability_answer([{"role": "assistant", "content": "x"}], None)
+          is None)
+
+    def _fake_classify_unmatched_topic(client, messages, model=None):
+        return {"intent_summary": "t", "track": "automation",
+                "capability_question": "will you suggest features if I explain my workflow",
+                "no_intent": None}
+
+    def _fake_extract_no_progress(client, messages, model=None, ws=None,
+                                  on_event=None, app=None):
+        return {"trigger": None, "scope_confirmed": False, "condition_groups": [],
+                "actions": [], "ai_extract": None, "unsupported_requests": [],
+                "closing": False, "capability_question": None, "no_intent": None,
+                "unmappable": [], "intent_summary": "t", "enabled_inboxes": None,
+                "feature_request_requested": None}
+
+    oc2, oae2 = router.classify, automation_extract.extract
+    router.classify = _fake_classify_unmatched_topic
+    automation_extract.extract = _fake_extract_no_progress
+    try:
+        turn1 = copilot.respond_structured(
+            None, [{"role": "user",
+                   "content": "Will you be able to suggest me the features, if I "
+                              "explain my workflow to you?"}])
+        turn2 = copilot.respond_structured(
+            None, [{"role": "user", "content": "Will you be able to suggest me "
+                                                "the features, if I explain my "
+                                                "workflow to you?"},
+                  {"role": "assistant", "content": turn1["capability_answer"]},
+                  {"role": "user", "content": "Yes"}])
+    finally:
+        router.classify, automation_extract.extract = oc2, oae2
+    check("end to end through respond_structured: turn 1 gets docent's real "
+          "answer, an unmatched meta-question topic falling back to the "
+          "(now directly responsive) overview, not a hardcoded stub",
+          turn1["capability_answer"] is not None
+          and "describe what you want" in turn1["capability_answer"].lower())
+    check("end to end: a same-topic re-classification on the very next turn "
+          "does NOT repeat the whole overview verbatim a second time",
+          turn2["capability_answer"] != turn1["capability_answer"])
+
     # ---- self-serve remediation: a non-one-click prerequisite says HOW -----
     check("connected_apps.remediation_for names a real prerequisite's fix",
           connected_apps.remediation_for("account_team_enabled") is not None

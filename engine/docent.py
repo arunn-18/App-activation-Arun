@@ -19,8 +19,33 @@ import re
 from apps import schema as apps_schema
 from automation import schema
 
+
+def _kw_match(text, keys):
+    """LEADING-word-boundary "does any of these keywords appear" check — a
+    plain substring `k in text` (the original approach) is too promiscuous
+    for short keys: "ai" matches inside "expl**ai**n"/"maint**ai**n", "tag"
+    matches inside "advan**tag**e", "move" matches inside "re**move**",
+    "api" matches inside "c**api**tal". A live test caught this for real: a
+    meta-question containing "if I explain my workflow" got routed to the
+    AI-variables topic purely because "explain" contains "ai" — an actual
+    cause of the "irrelevant answer" complaint, not a hypothetical one.
+
+    Deliberately only anchors the LEADING edge, not both: most keys here
+    are intentional word STEMS, not whole words — "assign" must still
+    match "assign**s**"/"assign**ed**"/"assign**ment**", "trigger" must
+    still match "trigger**s**", "classif" must still match "classif**y**".
+    A leading boundary alone already rules out every false-positive case
+    above (in each, the short key sits mid-word with a LETTER immediately
+    before it — "expl(ai)n", "advan(tag)e", "re(move)", "c(api)tal" — so
+    requiring nothing-but-a-word-char right before the key is enough)."""
+    return any(re.search(r"\b" + re.escape(k), text) for k in keys)
+
 _OVERVIEW = (
-    "Two kinds of thing I can set up. App features — enable once per "
+    "Describe what you want to happen, or what your workflow looks like, "
+    "and I'll match it to what's actually built here — asking about "
+    "anything I still need to fill in, and saying plainly if part of it "
+    "isn't supported rather than guessing. Two kinds of thing I can set "
+    "up. App features — enable once per "
     "workspace, no trigger involved: " + "; ".join(
         f"{f['name']} ({f['app'].title()})" for f in apps_schema.FEATURES.values())
     + ". And automations — a rule fires on one trigger (new inbound/outbound "
@@ -99,7 +124,7 @@ def _integration_answer(t):
     get read, using the exact same app-detection `relevant_capabilities()`
     already does, so the prose and the badges are never scoped differently
     from each other."""
-    named_apps = [a for a in _KNOWN_APPS if a in t]
+    named_apps = [a for a in _KNOWN_APPS if _kw_match(t, (a,))]
     apps_to_cover = named_apps or list(_KNOWN_APPS)
 
     def _disp(app):
@@ -166,10 +191,10 @@ def answer(topic):
     t = re.sub(r"\s+", " ", str(topic or "")).strip().lower()
     if not t:
         return _OVERVIEW
-    if any(k in t for k in _INTEGRATION_KEYS):
+    if _kw_match(t, _INTEGRATION_KEYS):
         return _integration_answer(t)
     for keys, text in _TOPICS:
-        if text is not None and any(k in t for k in keys):
+        if text is not None and _kw_match(t, keys):
             return text
     return _OVERVIEW
 
@@ -205,9 +230,9 @@ def relevant_capabilities(topic):
     integration" -> only ClickUp's entries); no app named -> every app's
     entries, same as answer()'s own "integrat" text covering all of them."""
     t = re.sub(r"\s+", " ", str(topic or "")).strip().lower()
-    if not any(k in t for k in _INTEGRATION_KEYS):
+    if not _kw_match(t, _INTEGRATION_KEYS):
         return []
-    named_apps = [a for a in _KNOWN_APPS if a in t]
+    named_apps = [a for a in _KNOWN_APPS if _kw_match(t, (a,))]
 
     def _matches(app):
         return not named_apps or app in named_apps

@@ -130,9 +130,14 @@ RULES:
    this show custom fields too?"), not a request to build or configure anything. Set
    it to a SHORT topic phrase echoing their words; otherwise null. A message that
    ANSWERS a question, names entities, picks an option, or states a value is NOT a
-   capability question, even if it mentions a capability. This is a READ-ONLY
-   classification — it does not change `track`, and the track-specific extractor
-   still runs afterward so any existing progress renders unchanged.
+   capability question, even if it mentions a capability. A bare affirmative/
+   negative ("yes", "sure", "go ahead", "no") replying to a QUESTION THE COPILOT
+   ITSELF JUST ASKED (including "do you want to know what I can do?") is NEVER a
+   capability_question, even when the copilot's own prior message was one — it is
+   an answer, and answers are read the same way regardless of what they're
+   answering. This is a READ-ONLY classification — it does not change `track`, and
+   the track-specific extractor still runs afterward so any existing progress
+   renders unchanged.
 4. no_intent: a SHORT reason when the LATEST user message has NO automation or
    app-setup content at all — a keysmash or gibberish ("sdfdsfdsfsd"), small talk, or
    a remark unrelated to building/configuring anything. null otherwise. Never set it

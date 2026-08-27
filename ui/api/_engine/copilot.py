@@ -754,6 +754,27 @@ def _turn(client, messages, model, ws, apps_ws=None, on_event=None, app=None):
     return spec, result
 
 
+def _dedup_capability_answer(messages, answer):
+    """A capability answer is composed fresh from schema.py every turn, with
+    no memory of what was just said — normally fine, since a genuinely
+    different topic gets a genuinely different answer. But a live test
+    found the SAME generic overview rendered twice in a row when a bare
+    "yes" (answering the copilot's OWN question) got misclassified as
+    another capability question by the router — reading as a broken-record
+    repeat, not new information. Detected by the composed text already
+    appearing verbatim in the immediately preceding assistant message —
+    never invents a different answer, just points back to it, since
+    repeating a wall of text twice never helps."""
+    if answer is None:
+        return None
+    last_assistant = next((m.get("content") for m in reversed(messages)
+                           if m.get("role") == "assistant"), None)
+    if last_assistant and answer in last_assistant:
+        return ("Same as I just said — go ahead and describe what you want, "
+                "or ask about something specific.")
+    return answer
+
+
 def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
                        on_event=None, app=None):
     """One turn, machine-readable: everything a UI needs to render the state.
@@ -783,7 +804,8 @@ def respond_structured(client, messages, model=None, ws=None, apps_ws=None,
         "feature_request": feature_result,
         "feature_test_suggestion": feature_test_suggestion,
         "test_run": connector_test_run(spec) if complete and feature_result is None else None,
-        "capability_answer": (docent.answer(spec["capability_question"])
+        "capability_answer": (_dedup_capability_answer(
+                                  messages, docent.answer(spec["capability_question"]))
                               if spec.get("capability_question") else None),
         # structured, badge-able capabilities for the SAME question — a
         # live test found a bare capability question rendering a misleading
@@ -901,7 +923,7 @@ def respond(client, messages, model=None, ws=None, apps_ws=None, app=None):
         return "\n\n".join(parts)
     if spec.get("capability_question"):
         # answer first, from the schema; the rule state follows unchanged
-        parts.append(docent.answer(spec["capability_question"]))
+        parts.append(_dedup_capability_answer(messages, docent.answer(spec["capability_question"])))
     if result["status"] == "complete":
         test_run_line = _render_test_run(connector_test_run(spec))
         if closing and is_followup:
